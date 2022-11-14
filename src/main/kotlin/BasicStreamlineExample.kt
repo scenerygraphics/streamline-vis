@@ -50,7 +50,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
 
             val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
 
-            val catmullRom = UniformBSpline(vecVerticesNotCentered)
+            val catmullRom = UniformBSpline(vecVerticesNotCentered, 10)
             val splineSize = catmullRom.splinePoints().size
             val geo = Curve(catmullRom, partitionAlongControlpoints = false) { triangle(splineSize) }
             geo.name = "Streamline #$index"
