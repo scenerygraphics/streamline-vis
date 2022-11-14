@@ -8,6 +8,9 @@ import graphics.scenery.geometry.UniformBSpline
 import graphics.scenery.trx.TRXReader
 import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
+import graphics.scenery.volumes.TransferFunction
+import graphics.scenery.volumes.Volume
+import java.nio.file.Paths
 
 /**
  * Visualizing streamlines with a basic data set.
@@ -25,25 +28,21 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
     var colorMode = ColorMode.GlobalDirection
     override fun init() {
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
+        val volume = Volume.fromPath(Paths.get("../../Datasets/tractography/scenery_tractography_vis_cortex2.tif"), hub)
+        volume.spatial().rotation.rotateX(Math.PI.toFloat()/2.0f)
+        volume.origin = Origin.FrontBottomLeft
+        volume.spatial().scale = Vector3f(50.0f)
+        volume.transferFunction = TransferFunction.ramp(0.1f, 0.5f)
+        scene.addChild(volume)
 
-        val trx1 = TRXReader.readTRXfromStream(this.javaClass.getResource("small.trx").openStream())
+        val tractogram = RichNode()
+        val trx1 = TRXReader.readTRX("../../Datasets/tractography/scenery_tractography_vis_wholebrain_newreference.trx")
+        logger.info("Transform is: ${trx1.header.voxelToRasMM}")
         // if using a larger dataset, insert a shuffled().take(100) before the forEachIndexed
-        trx1.streamlines.forEachIndexed { index, line ->
-            fun triangle(splineVerticesCount: Int): ArrayList<ArrayList<Vector3f>> {
-                val shapeList = ArrayList<ArrayList<Vector3f>>(splineVerticesCount)
-                for (i in 0 until splineVerticesCount) {
-                    val list = ArrayList<Vector3f>()
-                    list.add(Vector3f(0.1f, 0.1f, 0f))
-                    list.add(Vector3f(0.1f, -0.1f, 0f))
-                    list.add(Vector3f(-0.1f, -0.1f, 0f))
-                    shapeList.add(list)
-                }
-                return shapeList
-            }
-
+        trx1.streamlines.shuffled().take(1000).forEachIndexed { index, line ->
             val vecVerticesNotCentered = ArrayList<Vector3f>(line.vertices.size / 3)
             line.vertices.toList().windowed(3, 3) { p ->
-                val v = Vector3f(p[0], p[1], p[2])
+                val v = Vector3f(p[0], p[2], p[1])
                 if(v.length() > 0.001f) {
                     vecVerticesNotCentered.add(v)
                 }
@@ -53,7 +52,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
 
             val catmullRom = UniformBSpline(vecVerticesNotCentered)
             val splineSize = catmullRom.splinePoints().size
-            val geo = Curve(catmullRom) { triangle(splineSize) }
+            val geo = Curve(catmullRom, partitionAlongControlpoints = false) { triangle(splineSize) }
             geo.name = "Streamline #$index"
             geo.children.forEachIndexed { i, curveSegment ->
                 val localColor = (vecVerticesNotCentered[i+1] - (vecVerticesNotCentered[i] ?: Vector3f(0.0f))).normalize()
@@ -62,9 +61,11 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
                     ColorMode.GlobalDirection -> color
                 }
             }
-            geo.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
-            scene.addChild(geo)
+            tractogram.addChild(geo)
         }
+
+        tractogram.spatial().scale = Vector3f(0.1f)
+        scene.addChild(tractogram)
 
         val lightbox = Box(Vector3f(75.0f, 75.0f, 75.0f), insideNormals = true)
         lightbox.name = "Lightbox"
@@ -101,6 +102,20 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         @JvmStatic
         fun main(args: Array<String>) {
             BasicStreamlineExample().main()
+        }
+
+        val baseList = listOf(
+            Vector3f(0.1f, 0.1f, 0f),
+            Vector3f(0.1f, -0.1f, 0f),
+            Vector3f(-0.1f, -0.1f, 0f),
+        )
+
+        fun triangle(splineVerticesCount: Int): List<List<Vector3f>> {
+            val shapeList = ArrayList<List<Vector3f>>(splineVerticesCount)
+            for (i in 0 until splineVerticesCount) {
+                shapeList.add(baseList)
+            }
+            return shapeList
         }
     }
 }
