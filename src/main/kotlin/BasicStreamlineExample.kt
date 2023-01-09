@@ -10,7 +10,6 @@ import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
 import graphics.scenery.volumes.TransferFunction
 import graphics.scenery.volumes.Volume
-import org.scijava.io.location.FileLocation
 import java.nio.file.Paths
 import kotlin.math.sqrt
 
@@ -30,60 +29,60 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
     var colorMode = ColorMode.GlobalDirection
     override fun init() {
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
-        val reader = Volume.scifio.initializer().initializeReader(FileLocation(Paths.get("../../Datasets/tractography/scenery_tractography_vis_cortex1_ushort.nii.gz").toFile()))
-        val metadata = reader.metadata
-        val metadatatable = reader.metadata.table
-        val volume = Volume.fromPath(Paths.get("../../Datasets/tractography/scenery_tractography_vis_cortex1_ushort.nii.gz"), hub)
+        val dataset = System.getProperty("dataset")
+        val trx = System.getProperty("trx")
+
+        val volume = Volume.fromPath(Paths.get(dataset), hub)
+        val m = volume.metadata
 
         //check if we have qform code: "Q-form Code" -> if it's bigger than 0, use method 2, if "S-form Code" is bigger than 0, use method 3
         //method 2 of NIfTI for reading
-        var matrix4f = Matrix4f()
-        if(metadatatable.get("Q-form Code").toString().toFloat() > 0) { //method 2 of NIfTI for reading
-            val quatb = metadatatable.get("Quaternion b parameter").toString().toFloat()
-            val quatc = metadatatable.get("Quaternion c parameter").toString().toFloat()
-            val quatd = metadatatable.get("Quaternion d parameter").toString().toFloat()
-            val quata = sqrt(1.0-(quatb*quatb+quatc*quatc+quatd*quatd)).toFloat()
-            val quaternion = Quaternionf(quatb, quatc, quatd, quata)
+        var transform = Matrix4f()
+        if(m["Q-form Code"].toString().toFloat() > 0) { //method 2 of NIfTI for reading
+            val x = m["Quaternion b parameter"].toString().toFloat()
+            val y = m["Quaternion c parameter"].toString().toFloat()
+            val z = m["Quaternion d parameter"].toString().toFloat()
+            val w = sqrt(1.0-(x*x + y*y + z*z)).toFloat()
+            val quaternion = Quaternionf(x, y, z, w)
             val axisAngle = AxisAngle4f()
             quaternion.get(axisAngle)
-            logger.info("Rotation read from nifti is: ${quata}, ${quatb}, ${quatc}, ${quatd}, Axis angle is ${axisAngle}")
+            logger.info("Rotation read from nifti is: $quaternion, Axis angle is $axisAngle")
 
 
-            val pixeldim = FloatArray(3) {i -> 0F} //should be the correct translation of dimensions to width/height/thickness, but if anything is weird with the scaling, check again
-            pixeldim[0] = metadatatable.get("Voxel width").toString().toFloat()*100 //What to do with the xyz units parameter? -> xyz_unity provides a code for the unit: in this case mm, but I don't know how to transfer this information to scenery: here scale factor *100 even though we have mm and want to translate to mm
-            pixeldim[1] = metadatatable.get("Voxel height").toString().toFloat()*100
-            pixeldim[2] = metadatatable.get("Slice thickness").toString().toFloat()*100
+            val pixeldim = floatArrayOf(0.0f, 0.0f, 0.0f) //should be the correct translation of dimensions to width/height/thickness, but if anything is weird with the scaling, check again
+            pixeldim[0] = m["Voxel width"].toString().toFloat()*100 //What to do with the xyz units parameter? -> xyz_unity provides a code for the unit: in this case mm, but I don't know how to transfer this information to scenery: here scale factor *100 even though we have mm and want to translate to mm
+            pixeldim[1] = m["Voxel height"].toString().toFloat()*100
+            pixeldim[2] = m["Slice thickness"].toString().toFloat()*100
             logger.info("Pixeldim read from nifti is: ${pixeldim[0]}, ${pixeldim[1]}, ${pixeldim[2]}")
 
-            val qoffsetx = metadatatable.get("Quaternion x parameter").toString().toFloat()
-            val qoffsety = metadatatable.get("Quaternion y parameter").toString().toFloat()
-            val qoffsetz = metadatatable.get("Quaternion z parameter").toString().toFloat()
+            val qoffsetx = m["Quaternion x parameter"].toString().toFloat()
+            val qoffsety = m["Quaternion y parameter"].toString().toFloat()
+            val qoffsetz = m["Quaternion z parameter"].toString().toFloat()
             logger.info("QOffset read from nifti is: ${qoffsetx}, ${qoffsety}, ${qoffsetz}")
 
             //transformations that were given by the read metadata
-            volume.spatial().rotation = Quaternionf(quatb, quatc, quatd, quata)
+            volume.spatial().rotation = quaternion
             //volume.spatial().position = Vector3f(qoffsetx, qoffsety, qoffsetz)
             volume.spatial().scale = Vector3f(pixeldim)
 
-        }else if (metadatatable.get("S-form Code").toString().toFloat()>0) { //method 3 of NIfTI for reading
+        } else if (m["S-form Code"].toString().toFloat()>0) { //method 3 of NIfTI for reading
             for(i in 0..2){
                 for(j in 0..3){
-                    var coordinate : String
-                    when(i){
-                        0 -> coordinate = "X"
-                        1 -> coordinate = "Y"
-                        2 -> coordinate = "Z"
+                    val coordinate: String = when(i){
+                        0 -> "X"
+                        1 -> "Y"
+                        2 -> "Z"
                         else -> throw IllegalArgumentException()
                     }
-                    val value = metadatatable.get("Affine transform " + coordinate + "[" + j + "]")?.toString()?.toFloat() ?: throw NullPointerException()
-                    matrix4f.setRowColumn(i, j, value)
+                    val value = m["Affine transform $coordinate[$j]"]?.toString()?.toFloat() ?: throw NullPointerException()
+                    transform.setRowColumn(i, j, value)
                 }
             }
-            matrix4f.setRow(3, Vector4f(0F, 0F, 0F, 1F))
+            transform.setRow(3, Vector4f(0F, 0F, 0F, 1F))
             //val matrix4ftransp = matrix4f.transpose() //transposing should not happen to this matrix, since translation is the last column -> column major
-            logger.info("Affine transform read from nifti is: ${matrix4f}")
+            logger.info("Affine transform read from nifti is: $transform")
             volume.spatial().wantsComposeModel = false
-            volume.spatial().world = matrix4f
+            volume.spatial().world = transform
         }
 
         volume.origin = Origin.Center //works better than if we use bottom fron left as an origin
@@ -96,12 +95,15 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         logger.info("transformation of nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
 
         val tractogram = RichNode()
-        val trx1 = TRXReader.readTRX("../../Datasets/tractography/scenery_tractography_vis_wholebrain_newreference.trx")
-        var scale = Vector3f(0f,0f,0f)
-        var translation = Vector3f(0f, 0f, 0f)
-        var quat = Quaternionf(0f, 0f, 0f, 0f)
-        val aangle = AxisAngle4f()
-        logger.info("Transform of tractogram is: ${trx1.header.voxelToRasMM.transpose()}. Scaling is ${trx1.header.voxelToRasMM.getScale(scale)}. Translation is ${trx1.header.voxelToRasMM.getTranslation(translation)}. Normalized rotation quaternion is ${trx1.header.voxelToRasMM.getNormalizedRotation(quat).get(aangle)}.")
+        val trx1 = TRXReader.readTRX(trx)
+        val scale = Vector3f()
+        val translation = Vector3f()
+        val quat = Quaternionf()
+        trx1.header.voxelToRasMM.getScale(scale)
+        trx1.header.voxelToRasMM.getTranslation(translation)
+        trx1.header.voxelToRasMM.getNormalizedRotation(quat)
+
+        logger.info("Transform of tractogram is: ${trx1.header.voxelToRasMM.transpose()}. Scaling is $scale. Translation is $translation. Normalized rotation quaternion is $quat.")
 
         // if using a larger dataset, insert a shuffled().take(100) before the forEachIndexed
         trx1.streamlines.shuffled().take(1000).forEachIndexed { index, line ->

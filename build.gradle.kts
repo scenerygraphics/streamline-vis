@@ -10,18 +10,13 @@ group = "graphics.scenery"
 version = "1.0-SNAPSHOT"
 
 repositories {
-    mavenLocal() {
-        content {
-            includeGroup("graphics.scenery")
-        }
-    }
     mavenCentral()
     maven("https://maven.scijava.org/content/groups/public")
     maven("https://jitpack.io")
 }
 
 dependencies {
-    api("graphics.scenery:scenery:04798e0")
+    api("graphics.scenery:scenery:6f505c4c")
     api("org.slf4j:slf4j-simple:1.7.36")
     implementation("org.joml:joml:1.10.4")
     implementation("net.imglib2:imglib2:5.13.0")
