@@ -8,6 +8,7 @@ import graphics.scenery.geometry.UniformBSpline
 import graphics.scenery.trx.TRXReader
 import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
+import graphics.scenery.volumes.Colormap
 import graphics.scenery.volumes.TransferFunction
 import graphics.scenery.volumes.Volume
 import java.nio.file.Paths
@@ -55,14 +56,16 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
             pixeldim[2] = m["Slice thickness"].toString().toFloat()*100
             logger.info("Pixeldim read from nifti is: ${pixeldim[0]}, ${pixeldim[1]}, ${pixeldim[2]}")
 
-            val qoffsetx = m["Quaternion x parameter"].toString().toFloat()
-            val qoffsety = m["Quaternion y parameter"].toString().toFloat()
-            val qoffsetz = m["Quaternion z parameter"].toString().toFloat()
-            logger.info("QOffset read from nifti is: ${qoffsetx}, ${qoffsety}, ${qoffsetz}")
+            val offset = Vector3f(
+                m["Quaternion x parameter"].toString().toFloat() * 1.0f,
+                m["Quaternion y parameter"].toString().toFloat() * 1.0f,
+                m["Quaternion z parameter"].toString().toFloat() * 1.0f,
+            )
+            logger.info("QOffset read from nifti is: $offset")
 
             //transformations that were given by the read metadata
             volume.spatial().rotation = quaternion
-            //volume.spatial().position = Vector3f(qoffsetx, qoffsety, qoffsetz)
+            volume.spatial().position = offset/100.0f
             volume.spatial().scale = Vector3f(pixeldim)
 
         } else if (m["S-form Code"].toString().toFloat()>0) { //method 3 of NIfTI for reading
@@ -82,14 +85,15 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
             //val matrix4ftransp = matrix4f.transpose() //transposing should not happen to this matrix, since translation is the last column -> column major
             logger.info("Affine transform read from nifti is: $transform")
             volume.spatial().wantsComposeModel = false
-            volume.spatial().world = transform
+            volume.spatial().model = transform
         }
 
-        volume.origin = Origin.Center //works better than if we use bottom fron left as an origin
+//        volume.origin = Origin.Center //works better than if we use bottom fron left as an origin
+        volume.colormap = Colormap.get("grays")
         volume.transferFunction = TransferFunction.ramp(0.01f, 0.5f)
         //manual transformation which aligns the two objects (tractogram and volume) approximately
         volume.spatial().rotation = Quaternionf().rotationX(Math.PI.toFloat()/2)
-        volume.spatial().move(floatArrayOf(0.5F,3.5F, -4.5F))
+//        volume.spatial().move(floatArrayOf(0.5F,3.5F, -4.5F))
 
         scene.addChild(volume)
         logger.info("transformation of nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
