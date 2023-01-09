@@ -8,9 +8,11 @@ import graphics.scenery.geometry.UniformBSpline
 import graphics.scenery.trx.TRXReader
 import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
+import graphics.scenery.volumes.Colormap
 import graphics.scenery.volumes.TransferFunction
 import graphics.scenery.volumes.Volume
 import java.nio.file.Paths
+import kotlin.concurrent.thread
 
 /**
  * Visualizing streamlines with a basic data set.
@@ -28,15 +30,22 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
     var colorMode = ColorMode.GlobalDirection
     override fun init() {
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
-        val volume = Volume.fromPath(Paths.get("../../Datasets/tractography/scenery_tractography_vis_cortex2.tif"), hub)
-        volume.spatial().rotation.rotateX(Math.PI.toFloat()/2.0f)
-        volume.origin = Origin.FrontBottomLeft
-        volume.spatial().scale = Vector3f(50.0f)
-        volume.transferFunction = TransferFunction.ramp(0.1f, 0.5f)
-        scene.addChild(volume)
+
+        val dataset = System.getProperty("dataset")
+        val trx = System.getProperty("trx")
+
+        thread {
+            val volume = Volume.fromPath(
+                Paths.get(dataset),
+                hub
+            )
+            volume.transferFunction = TransferFunction.flat(0.5f)
+            volume.colormap = Colormap.get("grays")
+            scene.addChild(volume)
+        }
 
         val tractogram = RichNode()
-        val trx1 = TRXReader.readTRX("../../Datasets/tractography/scenery_tractography_vis_wholebrain_newreference.trx")
+        val trx1 = TRXReader.readTRX(trx)
         logger.info("Transform is: ${trx1.header.voxelToRasMM}")
         // if using a larger dataset, insert a shuffled().take(100) before the forEachIndexed
         trx1.streamlines.shuffled().take(1000).forEachIndexed { index, line ->
