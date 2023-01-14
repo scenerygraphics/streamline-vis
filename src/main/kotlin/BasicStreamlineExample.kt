@@ -12,6 +12,8 @@ import graphics.scenery.volumes.Colormap
 import graphics.scenery.volumes.TransferFunction
 import graphics.scenery.volumes.Volume
 import java.nio.file.Paths
+import java.util.Dictionary
+import javax.vecmath.Tuple2f
 import kotlin.math.sqrt
 
 /**
@@ -27,13 +29,25 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         GlobalDirection
     }
 
+    fun streamlineSelectionFromSphere(radius: Float, position: Vector3f, streamlines: ArrayList<ArrayList<Vector3f>>): ArrayList<ArrayList<Vector3f>>{
+        val streamlineSelection = ArrayList<ArrayList<Vector3f>>()
+        streamlines.forEachIndexed{index, vertices ->
+            val vecBegin = vertices.first()-position
+            val vecEnd = vertices.last()-position
+            if(vecBegin.length()<radius || vecEnd.length()<radius){
+                streamlineSelection.add(vertices)
+            }
+        }
+        return streamlineSelection
+    }
+
     var colorMode = ColorMode.GlobalDirection
     override fun init() {
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
         val dataset = System.getProperty("dataset")
         val trx = System.getProperty("trx")
 
-        val volume = Volume.fromPath(Paths.get(dataset), hub)
+        /*val volume = Volume.fromPath(Paths.get(dataset), hub)
         val m = volume.metadata
 
         //check if we have qform code: "Q-form Code" -> if it's bigger than 0, use method 2, if "S-form Code" is bigger than 0, use method 3
@@ -97,6 +111,15 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
 
         scene.addChild(volume)
         logger.info("transformation of nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
+*/
+        val sphere = Sphere(3f, 20)
+        sphere.spatial().position = Vector3f(0f,-3f,0f)
+        scene.addChild(sphere)
+
+        val sphere2 = Sphere(3f, 20)
+        sphere2.spatial().position = Vector3f(3.8f,7.1f,-4.5f)
+        scene.addChild(sphere2)
+
 
         val tractogram = RichNode()
         val trx1 = TRXReader.readTRX(trx)
@@ -108,7 +131,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         trx1.header.voxelToRasMM.getNormalizedRotation(quat)
 
         logger.info("Transform of tractogram is: ${trx1.header.voxelToRasMM.transpose()}. Scaling is $scale. Translation is $translation. Normalized rotation quaternion is $quat.")
-
+        val verticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
         // if using a larger dataset, insert a shuffled().take(100) before the forEachIndexed
         trx1.streamlines.shuffled().take(1000).forEachIndexed { index, line ->
             val vecVerticesNotCentered = ArrayList<Vector3f>(line.vertices.size / 3)
@@ -118,7 +141,29 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
                     vecVerticesNotCentered.add(v)
                 }
             }
+            verticesOfStreamlines.add(vecVerticesNotCentered)
 
+            /*val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
+
+            val catmullRom = UniformBSpline(vecVerticesNotCentered, 10)
+            val splineSize = catmullRom.splinePoints().size
+            val geo = Curve(catmullRom, partitionAlongControlpoints = false) { triangle(splineSize) }
+            geo.name = "Streamline #$index"
+            geo.children.forEachIndexed { i, curveSegment ->
+                val localColor = (vecVerticesNotCentered[i+1] - (vecVerticesNotCentered[i] ?: Vector3f(0.0f))).normalize()
+                curveSegment.materialOrNull()?.diffuse = when(colorMode) {
+                    ColorMode.LocalDirection -> (localColor + Vector3f(0.5f)) / 2.0f
+                    ColorMode.GlobalDirection -> color
+                }
+            }
+            tractogram.addChild(geo)*/
+        }
+
+        //val listVertices = streamlineSelectionFromSphere(sphere.radius, sphere.spatial().position, verticesOfStreamlines)
+        val listVertices = streamlineSelectionFromSphere(30f, Vector3f(0f, -30f, 0f), verticesOfStreamlines)
+        val listVertices2 = streamlineSelectionFromSphere(30f, Vector3f(38f,71f,-45f), listVertices)
+
+        listVertices2.forEachIndexed{index, vecVerticesNotCentered ->
             val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
 
             val catmullRom = UniformBSpline(vecVerticesNotCentered, 10)
