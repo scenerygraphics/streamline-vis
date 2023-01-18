@@ -47,8 +47,9 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
         val dataset = System.getProperty("dataset")
         val trx = System.getProperty("trx")
+        val maximumStreamlineCount = System.getProperty("maxStreamlines", "2000").toInt()
 
-        logger.info("Loading volume from $dataset and TRX tractogram from $trx")
+        logger.info("Loading volume from $dataset and TRX tractogram from $trx, will show $maximumStreamlineCount streamlines max.")
 
         val container = RichNode()
         container.spatial().rotation = Quaternionf().rotationX(-PI.toFloat()/2.0f)
@@ -133,7 +134,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         logger.info("Transform of tractogram is: ${tr.transpose()}. Scaling is $scale. Translation is $translation. Normalized rotation quaternion is $quat.")
 
         // if using a larger dataset, insert a shuffled().take(100) before the forEachIndexed
-        trx1.streamlines.shuffled().take(5000).forEachIndexed { index, line ->
+        trx1.streamlines.shuffled().take(maximumStreamlineCount).forEachIndexed { index, line ->
             val vecVerticesNotCentered = ArrayList<Vector3f>(line.vertices.size / 3)
             line.vertices.toList().windowed(3, 3) { p ->
                 // X axis is inverted compared to the NIFTi coordinate system
