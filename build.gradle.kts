@@ -16,7 +16,7 @@ repositories {
 }
 
 dependencies {
-    api("graphics.scenery:scenery:6f505c4c")
+    api("graphics.scenery:scenery:7a924aba")
     api("org.slf4j:slf4j-simple:1.7.36")
     implementation("org.joml:joml:1.10.4")
     implementation("net.imglib2:imglib2:5.13.0")
