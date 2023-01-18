@@ -39,6 +39,13 @@ tasks.withType<KotlinCompile> {
     kotlinOptions.jvmTarget = "11"
 }
 
+tasks.withType<JavaExec> {
+    if(javaVersion >= JavaVersion.VERSION_17) {
+        jvmArgs?.add("--add-opens=java.base/java.nio=ALL-UNNAMED")
+        jvmArgs?.add("--add-opens=java.base/sun.nio.ch=ALL-UNNAMED")
+    }
+}
+
 application {
-    mainClass.set("BasicStreamlineExample")
+    mainClass.set("Streamlines")
 }
