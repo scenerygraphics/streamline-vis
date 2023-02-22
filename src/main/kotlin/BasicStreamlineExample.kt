@@ -5,7 +5,7 @@ import graphics.scenery.backends.Renderer
 import graphics.scenery.geometry.Curve
 import graphics.scenery.numerics.Random
 import graphics.scenery.attribute.material.Material
-import graphics.scenery.controls.behaviours.MouseDragSphere
+import graphics.scenery.attribute.spatial.HasSpatial
 import graphics.scenery.controls.behaviours.SelectCommand
 import graphics.scenery.geometry.UniformBSpline
 import graphics.scenery.trx.TRXReader
@@ -16,7 +16,6 @@ import net.imglib2.RealPoint
 import net.imglib2.algorithm.kdtree.ClipConvexPolytopeKDTree
 import net.imglib2.algorithm.kdtree.ConvexPolytope
 import net.imglib2.algorithm.kdtree.HyperPlane
-import net.imglib2.algorithm.kdtree.SplitHyperPlaneKDTree
 
 /**
  * Visualizing streamlines with a basic data set.
@@ -31,9 +30,44 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         GlobalDirection
     }
 
-    //fun streamlineSelectionFromSphere(radius: Float, position: Vector3f, streamlines: ArrayList<ArrayList<Vector3f>>): ArrayList<ArrayList<Vector3f>>{
-    fun streamlineSelectionFromSphere(polytope: ConvexPolytope, streamlines: ArrayList<ArrayList<Vector3f>>): ArrayList<ArrayList<Vector3f>>{ //should rather be given a node of which the bounding box is calculated and used within this function
-        //creation of the kd tree holding all the last and first points of the streamlines -> should only be done once
+    fun streamlineSelectionFromPolytope(selectedArea: HasSpatial?, streamlines: ArrayList<ArrayList<Vector3f>>): ArrayList<ArrayList<Vector3f>>{
+        //calculations of the hyperplane distances (second argument): normal vector *(point product) point(here translation+extend of the bounding box, both times 10 since the scaling is weird)/normal vector length (here 1 or -1)
+        val timeStamp0 = System.nanoTime() / 1000000
+        val cubePos = selectedArea?.spatial()?.position ?: throw NullPointerException()
+        val boundingBox = selectedArea.boundingBox ?: throw NullPointerException()
+        val hyperplane1 = HyperPlane(0.0,0.0,-1.0, boundingBox.max.z.toDouble().times(10).plus(cubePos.z*10).times(-1))
+        val hyperplane2 = HyperPlane(-1.0,0.0,0.0, boundingBox.max.x.toDouble().times(10).plus(cubePos.x*10).times(-1))
+        val hyperplane3 = HyperPlane(0.0,0.0,1.0, boundingBox.min.z.toDouble().times((10)).plus(cubePos.z*10))
+        val hyperplane4 = HyperPlane(1.0,0.0,0.0, boundingBox.min.x.toDouble().times((10)).plus(cubePos.x*10))
+        val hyperplane5 = HyperPlane(0.0, -1.0,0.0, boundingBox.max.y.toDouble().times(10).plus(cubePos.y*10).times(-1))
+        val hyperplane6 = HyperPlane(0.0, 1.0,0.0, boundingBox.min.y.toDouble().times(10).plus(cubePos.y*10))
+        val polytope = ConvexPolytope(hyperplane1, hyperplane2, hyperplane3, hyperplane4, hyperplane5, hyperplane6)
+        val timeStampPolytope = System.nanoTime() / 1000000
+
+        val localKDTree : KDTree<Vector2i>
+        if(streamlines == verticesOfStreamlines){
+            localKDTree = globalKDTree
+        }else{
+            localKDTree = createKDTree(streamlines)
+        }
+        val timeStampKDTree = System.nanoTime() / 1000000
+
+        val streamlineSelection = ArrayList<ArrayList<Vector3f>>()
+        val clipkdtree = ClipConvexPolytopeKDTree(localKDTree)
+        clipkdtree.clip(polytope)
+
+        clipkdtree.insideNodes.forEach { node ->
+            val index = node.get().x
+            streamlineSelection.add(streamlines[index])
+        }
+        logger.info("Streamline selection contains ${streamlineSelection.size} streamlines")
+        val timeStampClipTree = System.nanoTime() / 1000000
+        logger.info("Time polytope: ${timeStampPolytope-timeStamp0}, Time kdTree: ${timeStampKDTree-timeStampPolytope}, Time clipTree: ${timeStampClipTree-timeStampKDTree}")
+
+        return streamlineSelection
+    }
+
+    fun createKDTree(streamlines: ArrayList<ArrayList<Vector3f>>) : KDTree<Vector2i>{
         val listLength = streamlines.size*2
         val valuesList = List(listLength){ index ->
             val even = index % 2
@@ -48,118 +82,19 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
             val position = RealPoint(streamlinepoint.x, streamlinepoint.y, streamlinepoint.z)
             position
         }
-        val kdtree = KDTree(valuesList, positionsList)
-
-        val streamlineSelection = ArrayList<ArrayList<Vector3f>>()
-        val clipkdtree = ClipConvexPolytopeKDTree(kdtree)
-        clipkdtree.clip(polytope)
-        val insideNodes = clipkdtree.insideNodes
-        clipkdtree.insideNodes.forEach { node ->
-            val index = node.get().x
-            streamlineSelection.add(streamlines[index])
-        } //get the belonging streamlines from these nodes -> Node should have the index as the value -> extract these indices and return a list with the streamlines that belong
-        logger.info("Streamline selection contains ${streamlineSelection.size} streamlines")
-
-        /*val hyperplane1 = HyperPlane(0.0,0.0,-1.0, 5.0) //distance = normal * (Scalar product) point on plane / length of normal
-        val hyperplane2 = HyperPlane(-1.0,0.0,0.0, -78.0)
-        val hyperplane3 = HyperPlane(0.0,0.0,1.0, -85.0) //normal vector was changed (*-1), since without it, there wouldn't be correct fibers displayed, as none would be selected
-        val hyperplane4 = HyperPlane(1.0,0.0,0.0, -2.0)
-        val hyperplane5 = HyperPlane(0.0, -1.0,0.0, -111.0)
-        val hyperplane6 = HyperPlane(0.0,1.0,0.0, 31.0)
-
-        val splithyperplanetree = SplitHyperPlaneKDTree(kdtree)
-        splithyperplanetree.split(hyperplane1)
-        var aboveNodes = splithyperplanetree.aboveNodes
-
-        val streamlineSelection = ArrayList<ArrayList<Vector3f>>()
-
-       val vals : ArrayList<Vector2i> = arrayListOf()
-        val poss : ArrayList<RealPoint> = arrayListOf()
-        aboveNodes.forEach { node ->
-            vals.add(node.get())
-            poss.add(node.positionAsRealPoint())
-        }
-        val kdtree2 = KDTree(vals, poss)
-
-        val splithyperplanetree2 = SplitHyperPlaneKDTree(kdtree2)
-        splithyperplanetree2.split(hyperplane6)
-        aboveNodes = splithyperplanetree2.aboveNodes
-
-        val vals3 : ArrayList<Vector2i> = arrayListOf()
-        val poss3 : ArrayList<RealPoint> = arrayListOf()
-        aboveNodes.forEach { node ->
-            vals3.add(node.get())
-            poss3.add(node.positionAsRealPoint())
-        }
-        val kdtree3 = KDTree(vals3, poss3)
-
-        val splithyperplanetree3 = SplitHyperPlaneKDTree(kdtree3)
-        splithyperplanetree3.split(hyperplane4)
-        aboveNodes = splithyperplanetree3.aboveNodes
-
-        val vals4 : ArrayList<Vector2i> = arrayListOf()
-        val poss4 : ArrayList<RealPoint> = arrayListOf()
-        aboveNodes.forEach { node ->
-            vals4.add(node.get())
-            poss4.add(node.positionAsRealPoint())
-        }
-        val kdtree4 = KDTree(vals4, poss4)
-
-        val splithyperplanetree4 = SplitHyperPlaneKDTree(kdtree4)
-        splithyperplanetree4.split(hyperplane2)
-        aboveNodes = splithyperplanetree4.aboveNodes
-
-       val vals5 : ArrayList<Vector2i> = arrayListOf()
-        val poss5 : ArrayList<RealPoint> = arrayListOf()
-        aboveNodes.forEach { node ->
-            vals5.add(node.get())
-            poss5.add(node.positionAsRealPoint())
-        }
-        val kdtree5 = KDTree(vals5, poss5)
-
-        val splithyperplanetree5 = SplitHyperPlaneKDTree(kdtree5)
-        splithyperplanetree5.split(hyperplane3)
-        aboveNodes = splithyperplanetree5.aboveNodes
-
-        val vals6 : ArrayList<Vector2i> = arrayListOf()
-        val poss6 : ArrayList<RealPoint> = arrayListOf()
-        aboveNodes.forEach { node ->
-            vals6.add(node.get())
-            poss6.add(node.positionAsRealPoint())
-        }
-        val kdtree6 = KDTree(vals6, poss6)
-
-        val splithyperplanetree6 = SplitHyperPlaneKDTree(kdtree6)
-        splithyperplanetree6.split(hyperplane5)
-        aboveNodes = splithyperplanetree6.aboveNodes
-
-        val size = aboveNodes.count()
-        logger.info("Streamline selection contains $size streamlines")
-        aboveNodes.forEach { node ->
-            val index = node.get().x
-            streamlineSelection.add(streamlines[index])
-        }*/
-
-        /*val streamlineSelection = ArrayList<ArrayList<Vector3f>>()
-        streamlines.forEachIndexed{index, vertices ->
-            val vecBegin = vertices.first()-position
-            val vecEnd = vertices.last()-position
-            if(vecBegin.length()<radius || vecEnd.length()<radius){
-                streamlineSelection.add(vertices)
-            }
-        }
-        return streamlineSelection*/
-        return streamlineSelection
+        return KDTree(valuesList, positionsList)
     }
 
     var colorMode = ColorMode.GlobalDirection
     val verticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
-    lateinit var wholetractogram : Node
+    var selectionVerticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
+    lateinit var globalKDTree : KDTree<Vector2i>
     override fun init() {
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
         val dataset = System.getProperty("dataset")
         val trx = System.getProperty("trx")
 
+        //the following outcommented code loads the nifti from file; Not needed in this example for streamline selection
         /*val volume = Volume.fromPath(Paths.get(dataset), hub)
         val m = volume.metadata
 
@@ -225,18 +160,17 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         scene.addChild(volume)
         logger.info("transformation of nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
 */
-        /*val sphere = Sphere(3f, 20)
-        sphere.spatial().position = Vector3f(0f,-3f,0f)
-        scene.addChild(sphere)
 
-
-        val sphere2 = Sphere(3f, 20)
-        sphere2.spatial().position = Vector3f(3.8f,7.1f,-4.5f)
-        scene.addChild(sphere2)*/
-
+        //adds boxes that are used to model bounding boxes: The streamlines get selected according to which end / begin within these boxes
         val cube = Box(Vector3f(8f, 8f, 8f))
         cube.spatial().position = Vector3f(3.8f, 7.1f, -4.5f)
+        cube.name = "Brain area"
         scene.addChild(cube)
+
+        val cube2 = Box(Vector3f(6f, 6f, 6f))
+        cube2.spatial().position = Vector3f(0f,-3f,0f)
+        cube2.name = "Brain area"
+        scene.addChild(cube2)
 
         val tractogram = RichNode()
         val trx1 = TRXReader.readTRX(trx)
@@ -248,10 +182,6 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         trx1.header.voxelToRasMM.getNormalizedRotation(quat)
 
         logger.info("Transform of tractogram is: ${trx1.header.voxelToRasMM.transpose()}. Scaling is $scale. Translation is $translation. Normalized rotation quaternion is $quat.")
-        // if using a larger dataset, insert a shuffled().take(100) before the forEachIndexed
-        //trx1.streamlines.shuffled().take(1000).forEachIndexed { index, line ->
-        /*val geoComplete = List<Node>(trx1.streamlines.size){ index ->
-            val line = trx1.streamlines[index]*/
 
         trx1.streamlines.forEachIndexed { index, line ->
             val vecVerticesNotCentered = ArrayList<Vector3f>(line.vertices.size / 3)
@@ -261,36 +191,18 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
                     vecVerticesNotCentered.add(v)
                 }
             }
-            verticesOfStreamlines.add(vecVerticesNotCentered) //.map { it.mul(0.1f) } as ArrayList<Vector3f>) //transform tractogram and not have to worry about transforming the sphere-pos / sphere-radius plus not having to scale later on;
-            /*val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
-
-            val catmullRom = UniformBSpline(vecVerticesNotCentered, 10)
-            val splineSize = catmullRom.splinePoints().size
-            val geoSingle = Curve(catmullRom, partitionAlongControlpoints = false) { triangle(splineSize) }
-            geoSingle.name = "Streamline #$index"
-            geoSingle.children.forEachIndexed { i, curveSegment ->
-                val localColor = (vecVerticesNotCentered[i+1] - (vecVerticesNotCentered[i] ?: Vector3f(0.0f))).normalize()
-                curveSegment.materialOrNull()?.diffuse = when(colorMode) {
-                    ColorMode.LocalDirection -> (localColor + Vector3f(0.5f)) / 2.0f
-                    ColorMode.GlobalDirection -> color
-                }
-            }
-            geoSingle*/
+            verticesOfStreamlines.add(vecVerticesNotCentered) //.map { it.mul(0.1f) } as ArrayList<Vector3f>) //transform tractogram, so the brain areas don't have to be "scaled" for streamline selection; If used like this right now, huge streamlines get displayed
         }
 
-        /*//val listVertices = streamlineSelectionFromSphere(sphere.radius, sphere.spatial().position, verticesOfStreamlines)
-        val listVertices1 = streamlineSelectionFromSphere(30f, Vector3f(0f, -30f, 0f), verticesOfStreamlines)
-        val listVertices = streamlineSelectionFromSphere(30f, Vector3f(38f,71f,-45f), listVertices1)*/
-
-        //geoComplete.shuffled().take(1000).forEach{streamline -> tractogram.addChild(streamline)}
-
-        val verticesOfStreamlinesSelection = verticesOfStreamlines.shuffled().take(1000) as ArrayList<ArrayList<Vector3f>>
-        displayableStreamlinesFromVerticesList(verticesOfStreamlinesSelection).forEach{ streamline -> tractogram.addChild(streamline)}
+        selectionVerticesOfStreamlines = verticesOfStreamlines
+        displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(1000) as ArrayList<ArrayList<Vector3f>>).forEach{ streamline -> tractogram.addChild(streamline)}
 
         tractogram.spatial().scale = Vector3f(0.1f)
         logger.info("transformation of tractogram is ${tractogram.spatial().world}, Position is ${tractogram.spatial().worldPosition()}, Scaling is ${tractogram.spatial().worldScale()}, Rotation is ${tractogram.spatial().worldRotation()}")
         scene.addChild(tractogram)
-        wholetractogram = tractogram
+        tractogram.name = "Whole brain tractogram"
+
+        globalKDTree = createKDTree(verticesOfStreamlines)
 
         val lightbox = Box(Vector3f(75.0f, 75.0f, 75.0f), insideNormals = true)
         lightbox.name = "Lightbox"
@@ -318,14 +230,20 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         scene.addChild(cam)
     }
 
-    fun displayableStreamlinesFromVerticesList(listVertices: ArrayList<ArrayList<Vector3f>>):List<Node> { //an der Stelle vielleicht schon alle Position-Lists durch 10 teilen? -> eigentlich schon vorher bei erstelleung Vertex-Liste
+    fun displayableStreamlinesFromVerticesList(listVertices: ArrayList<ArrayList<Vector3f>>):List<Node> {
+        var timeStamp0 = 0.toLong()
+        var timeStampSplineSize = 0.toLong()
+        var timeStampGeo = 0.toLong()
+        logger.info("Display of ${listVertices.size} streamlines")
         val streamlines = List<Node>(listVertices.size){index ->
             val vecVerticesNotCentered = listVertices[index]
             val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
-
             val catmullRom = UniformBSpline(vecVerticesNotCentered, 10)
+            timeStamp0 = System.nanoTime()
             val splineSize = catmullRom.splinePoints().size
+            timeStampSplineSize = System.nanoTime()
             val geo = Curve(catmullRom, partitionAlongControlpoints = false) { triangle(splineSize) }
+            timeStampGeo = System.nanoTime()
             geo.name = "Streamline #$index"
             geo.children.forEachIndexed { i, curveSegment ->
                 val localColor = (vecVerticesNotCentered[i+1] - (vecVerticesNotCentered[i] ?: Vector3f(0.0f))).normalize()
@@ -336,6 +254,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
             }
             geo
         }
+        logger.info("Time for splineSize: ${(timeStampSplineSize-timeStamp0)*listVertices.size/1000000}, Time for creating curve-geometry: ${(timeStampGeo-timeStampSplineSize)*listVertices.size/1000000}")
         return streamlines
     }
 
@@ -344,55 +263,33 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         setupCameraModeSwitching()
 
         val displayStreamlines: (Scene.RaycastResult, Int, Int) -> Unit = { raycastResult, i, i2 ->
-            wholetractogram.visible = false
-            /*var pos = Vector3f(0f,0f,0f)
-            raycastResult.matches.firstOrNull()?.let{nearest -> //it returns a point light instead of the sphere, even though the sphere is in the list with all the matches -> rather search specifically for a sphere
-              pos = nearest.node.spatialOrNull()?.position?.mul(10f) ?: Vector3f(0f,0f,0f)
-            } //what if it isn't a sphere? Also did not work, since other scene nodes came before the sphere*/
+            scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = false
 
-            //rather iterate through matches and see, whether they are spheres; This one didn't work, for it always said sphere to be of type Unit
-            /*val sphere =
-            raycastResult.matches.forEach { match ->
-                if(match.node.name == "sphere") match.node as Sphere
-            }*/
-            /*var sphere = Sphere()
-            raycastResult.matches.forEach { match ->
-                if(match.node.name == "sphere"){
-                    sphere = match.node as Sphere
+            var selectedArea : HasSpatial? = null
+            for (match in raycastResult.matches) {
+                if(match.node.name == "Brain area"){
+                    selectedArea = match.node as HasSpatial
+                    break
                 }
             }
 
-            val spRadius = sphere.radius * 10
-            val spPos = sphere.spatial().position.mul(10f)*/
-
-            //do the same with a cube-object
-            var cube = Box()
-            raycastResult.matches.forEach { match ->
-                if(match.node.name == "box"){
-                    cube = match.node as Box
-                }
-            }
-            //calculations of the hyperplane distances (second argument): normal vector *(point product) point(here translation+extend of the bounding box, both times 10 since the scaling is weird)/normal vector length (here 1)
-            val hyperplane1 = HyperPlane(0.0,0.0,-1.0, cube.boundingBox?.max?.z?.toDouble()?.times(10)?.plus(-45)?.times(-1) ?:0.0) //distance = normal * (Scalar product) point on plane / length of normal
-            val hyperplane2 = HyperPlane(-1.0,0.0,0.0, cube.boundingBox?.max?.x?.toDouble()?.times(10)?.plus(38)?.times(-1) ?:0.0)
-            val hyperplane3 = HyperPlane(0.0,0.0,1.0, cube.boundingBox?.min?.z?.toDouble()?.times((10))?.plus(-45) ?:0.0)
-            val hyperplane4 = HyperPlane(1.0,0.0,0.0, cube.boundingBox?.min?.x?.toDouble()?.times((10))?.plus(38) ?:0.0)
-            val hyperplane5 = HyperPlane(0.0, -1.0,0.0, cube.boundingBox?.max?.y?.toDouble()?.times(10)?.plus(71)?.times(-1) ?:0.0)
-            val hyperplane6 = HyperPlane(0.0, 1.0,0.0, cube.boundingBox?.min?.y?.toDouble()?.times(10)?.plus(71) ?:0.0)
-            val polytope = ConvexPolytope(hyperplane1, hyperplane2, hyperplane3, hyperplane4, hyperplane5, hyperplane6)
-
-            //only show those that are selected by the sphere; where do I get the info about the tractogram / streamlines that are required?
-            /*var streamlineSelection = streamlineSelectionFromSphere(spRadius, spPos, verticesOfStreamlines)
-            streamlineSelection = streamlineSelectionFromSphere(30f, Vector3f(38f,71f,-45f), streamlineSelection).shuffled().take(1000) as ArrayList<ArrayList<Vector3f>>*/
-            var streamlineSelection = streamlineSelectionFromSphere(polytope, verticesOfStreamlines)
-            if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled().take(1000) as ArrayList<ArrayList<Vector3f>> else wholetractogram.visible = true
-            Log.info("Streamline selection was done according to the selected object")
-            val displayableStreamlines = displayableStreamlinesFromVerticesList(streamlineSelection)
+            val timeStamp0 = System.nanoTime() / 1000000
+            var streamlineSelection = streamlineSelectionFromPolytope(selectedArea, selectionVerticesOfStreamlines)
+            val timeStampSelection = System.nanoTime() / 1000000
+            selectionVerticesOfStreamlines = streamlineSelection
+            if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled().take(1000) as ArrayList<ArrayList<Vector3f>> //else scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
             val tractogramReduced = RichNode()
+            scene.addChild(tractogramReduced)
+            val timeStamp0_2 = System.nanoTime() / 1000000
+            val displayableStreamlines = displayableStreamlinesFromVerticesList(streamlineSelection)
+            val timeStampGeometry = System.nanoTime() / 1000000
 
             displayableStreamlines.forEach{streamline -> tractogramReduced.addChild(streamline)}
             tractogramReduced.spatial().scale = Vector3f(0.1f)
-            scene.addChild(tractogramReduced)
+
+            scene.removeChild("Reduced tractogram")
+            tractogramReduced.name = "Reduced tractogram"
+            logger.info("Time demand streamline selection: ${timeStampSelection-timeStamp0}, Time demand calculating geometry of streamlines: ${timeStampGeometry-timeStamp0_2}")
         }
         renderer?.let { r ->
             inputHandler?.addBehaviour(
@@ -403,15 +300,6 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
                 ))
         }
         inputHandler?.addKeyBinding("selectStreamlines", "double-click button1")
-
-        inputHandler?.addBehaviour(
-            "dragObject", MouseDragSphere(
-                "dragObject", {
-                    scene.findObserver()
-                }, debugRaycast = false
-            )
-        )
-        inputHandler?.addKeyBinding("dragObject", "1")//make sure, that only spheres can be selected here
     }
 
     companion object {
