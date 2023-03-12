@@ -11,6 +11,7 @@ import graphics.scenery.geometry.UniformBSpline
 import graphics.scenery.trx.TRXReader
 import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
+import graphics.scenery.utils.extensions.times
 import net.imglib2.KDTree
 import net.imglib2.RealPoint
 import net.imglib2.algorithm.kdtree.ClipConvexPolytopeKDTree
@@ -35,12 +36,12 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         val timeStamp0 = System.nanoTime() / 1000000
         val cubePos = selectedArea?.spatial()?.position ?: throw NullPointerException()
         val boundingBox = selectedArea.boundingBox ?: throw NullPointerException()
-        val hyperplane1 = HyperPlane(0.0,0.0,-1.0, boundingBox.max.z.toDouble().times(10).plus(cubePos.z*10).times(-1))
-        val hyperplane2 = HyperPlane(-1.0,0.0,0.0, boundingBox.max.x.toDouble().times(10).plus(cubePos.x*10).times(-1))
-        val hyperplane3 = HyperPlane(0.0,0.0,1.0, boundingBox.min.z.toDouble().times((10)).plus(cubePos.z*10))
-        val hyperplane4 = HyperPlane(1.0,0.0,0.0, boundingBox.min.x.toDouble().times((10)).plus(cubePos.x*10))
-        val hyperplane5 = HyperPlane(0.0, -1.0,0.0, boundingBox.max.y.toDouble().times(10).plus(cubePos.y*10).times(-1))
-        val hyperplane6 = HyperPlane(0.0, 1.0,0.0, boundingBox.min.y.toDouble().times(10).plus(cubePos.y*10))
+        val hyperplane1 = HyperPlane(0.0,0.0,-1.0, boundingBox.max.z.toDouble().plus(cubePos.z).times(-1))
+        val hyperplane2 = HyperPlane(-1.0,0.0,0.0, boundingBox.max.x.toDouble().plus(cubePos.x).times(-1))
+        val hyperplane3 = HyperPlane(0.0,0.0,1.0, boundingBox.min.z.toDouble().plus(cubePos.z))
+        val hyperplane4 = HyperPlane(1.0,0.0,0.0, boundingBox.min.x.toDouble().plus(cubePos.x))
+        val hyperplane5 = HyperPlane(0.0, -1.0,0.0, boundingBox.max.y.toDouble().plus(cubePos.y).times(-1))
+        val hyperplane6 = HyperPlane(0.0, 1.0,0.0, boundingBox.min.y.toDouble().plus(cubePos.y))
         val polytope = ConvexPolytope(hyperplane1, hyperplane2, hyperplane3, hyperplane4, hyperplane5, hyperplane6)
         val timeStampPolytope = System.nanoTime() / 1000000
 
@@ -191,13 +192,13 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
                     vecVerticesNotCentered.add(v)
                 }
             }
-            verticesOfStreamlines.add(vecVerticesNotCentered) //.map { it.mul(0.1f) } as ArrayList<Vector3f>) //transform tractogram, so the brain areas don't have to be "scaled" for streamline selection; If used like this right now, huge streamlines get displayed
+            verticesOfStreamlines.add(vecVerticesNotCentered.map { it.mul(0.1f) } as ArrayList<Vector3f>) //transform tractogram, so the brain areas don't have to be "scaled" for streamline selection;
         }
 
         selectionVerticesOfStreamlines = verticesOfStreamlines
         displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(1000) as ArrayList<ArrayList<Vector3f>>).forEach{ streamline -> tractogram.addChild(streamline)}
 
-        tractogram.spatial().scale = Vector3f(0.1f)
+        //tractogram.spatial().scale = Vector3f(0.1f)
         logger.info("transformation of tractogram is ${tractogram.spatial().world}, Position is ${tractogram.spatial().worldPosition()}, Scaling is ${tractogram.spatial().worldScale()}, Rotation is ${tractogram.spatial().worldRotation()}")
         scene.addChild(tractogram)
         tractogram.name = "Whole brain tractogram"
@@ -285,7 +286,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
             val timeStampGeometry = System.nanoTime() / 1000000
 
             displayableStreamlines.forEach{streamline -> tractogramReduced.addChild(streamline)}
-            tractogramReduced.spatial().scale = Vector3f(0.1f)
+            //tractogramReduced.spatial().scale = Vector3f(0.1f)
 
             scene.removeChild("Reduced tractogram")
             tractogramReduced.name = "Reduced tractogram"
@@ -309,9 +310,9 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         }
 
         val baseList = listOf(
-            Vector3f(0.1f, 0.1f, 0f),
-            Vector3f(0.1f, -0.1f, 0f),
-            Vector3f(-0.1f, -0.1f, 0f),
+            Vector3f(0.1f, 0.1f, 0f).times(0.1f),
+            Vector3f(0.1f, -0.1f, 0f).times(0.1f),
+            Vector3f(-0.1f, -0.1f, 0f).times(0.1f),
         )
 
         fun triangle(splineVerticesCount: Int): List<List<Vector3f>> {
