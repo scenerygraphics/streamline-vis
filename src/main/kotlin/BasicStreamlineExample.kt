@@ -12,11 +12,16 @@ import graphics.scenery.trx.TRXReader
 import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
 import graphics.scenery.utils.extensions.times
+import graphics.scenery.volumes.Colormap
+import graphics.scenery.volumes.TransferFunction
+import graphics.scenery.volumes.Volume
 import net.imglib2.KDTree
 import net.imglib2.RealPoint
 import net.imglib2.algorithm.kdtree.ClipConvexPolytopeKDTree
 import net.imglib2.algorithm.kdtree.ConvexPolytope
 import net.imglib2.algorithm.kdtree.HyperPlane
+import java.lang.Math.sqrt
+import java.nio.file.Paths
 
 /**
  * Visualizing streamlines with a basic data set.
@@ -32,7 +37,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
     }
 
     fun streamlineSelectionFromPolytope(selectedArea: HasSpatial?, streamlines: ArrayList<ArrayList<Vector3f>>): ArrayList<ArrayList<Vector3f>>{
-        //calculations of the hyperplane distances (second argument): normal vector *(point product) point(here translation+extend of the bounding box, both times 10 since the scaling is weird)/normal vector length (here 1 or -1)
+        //calculations of the hyperplane distances (second argument): normal vector *(point product) point(here translation+extend of the bounding box/normal vector length (here 1 or -1)
         val timeStamp0 = System.nanoTime() / 1000000
         val cubePos = selectedArea?.spatial()?.position ?: throw NullPointerException()
         val boundingBox = selectedArea.boundingBox ?: throw NullPointerException()
@@ -94,6 +99,29 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
         val dataset = System.getProperty("dataset")
         val trx = System.getProperty("trx")
+        val parcellation = System.getProperty("parcels")
+
+        /*val parcel7 = System.getProperty("parcel7")
+        val parcelMesh7 = Mesh()
+        parcelMesh7.readFrom(parcel7)
+        parcelMesh7.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
+        parcelMesh7.name = "Brain area"
+        scene.addChild(parcelMesh7)*/
+
+        val parcellationMesh = Mesh()
+        parcellationMesh.readFrom("C:\\Users\\EllaHirche\\OneDrive\\Desktop\\Arbeit\\Datasets\\tractography\\scenery_tractography_vis_cortex_labels.nii.gz.obj")
+        parcellationMesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
+        parcellationMesh.name = "Brain area"
+        parcellationMesh.spatial().rotation = Quaternionf().rotationX(-Math.PI.toFloat()/2)
+        parcellationMesh.children.forEach {child ->
+            child.materialOrNull()?.blending = Blending(transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
+                    destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)  // print status, if there is no blending
+            val material = child.materialOrNull()
+            material
+        }
+        //parcellationMesh.material().
+        scene.addChild(parcellationMesh)
+
 
         //the following outcommented code loads the nifti from file; Not needed in this example for streamline selection
         /*val volume = Volume.fromPath(Paths.get(dataset), hub)
@@ -163,7 +191,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
 */
 
         //adds boxes that are used to model bounding boxes: The streamlines get selected according to which end / begin within these boxes
-        val cube = Box(Vector3f(8f, 8f, 8f))
+        /*val cube = Box(Vector3f(8f, 8f, 8f))
         cube.spatial().position = Vector3f(3.8f, 7.1f, -4.5f)
         cube.name = "Brain area"
         scene.addChild(cube)
@@ -171,7 +199,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         val cube2 = Box(Vector3f(6f, 6f, 6f))
         cube2.spatial().position = Vector3f(0f,-3f,0f)
         cube2.name = "Brain area"
-        scene.addChild(cube2)
+        scene.addChild(cube2)*/
 
         val tractogram = RichNode()
         val trx1 = TRXReader.readTRX(trx)
@@ -196,7 +224,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         }
 
         selectionVerticesOfStreamlines = verticesOfStreamlines
-        displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(1000) as ArrayList<ArrayList<Vector3f>>).forEach{ streamline -> tractogram.addChild(streamline)}
+        displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(5000) as ArrayList<ArrayList<Vector3f>>).forEach{ streamline -> tractogram.addChild(streamline)}
 
         //tractogram.spatial().scale = Vector3f(0.1f)
         logger.info("transformation of tractogram is ${tractogram.spatial().world}, Position is ${tractogram.spatial().worldPosition()}, Scaling is ${tractogram.spatial().worldScale()}, Rotation is ${tractogram.spatial().worldRotation()}")
@@ -239,7 +267,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         val streamlines = List<Node>(listVertices.size){index ->
             val vecVerticesNotCentered = listVertices[index]
             val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
-            val catmullRom = UniformBSpline(vecVerticesNotCentered, 10)
+            val catmullRom = UniformBSpline(vecVerticesNotCentered, 2)
             timeStamp0 = System.nanoTime()
             val splineSize = catmullRom.splinePoints().size
             timeStampSplineSize = System.nanoTime()
@@ -268,7 +296,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
 
             var selectedArea : HasSpatial? = null
             for (match in raycastResult.matches) {
-                if(match.node.name == "Brain area"){
+                if(match.node.name.startsWith("grp")){ //if(match.node.name == "Brain area"){
                     selectedArea = match.node as HasSpatial
                     break
                 }
@@ -278,7 +306,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
             var streamlineSelection = streamlineSelectionFromPolytope(selectedArea, selectionVerticesOfStreamlines)
             val timeStampSelection = System.nanoTime() / 1000000
             selectionVerticesOfStreamlines = streamlineSelection
-            if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled().take(1000) as ArrayList<ArrayList<Vector3f>> //else scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
+            if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled().take(5000) as ArrayList<ArrayList<Vector3f>> //else scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
             val tractogramReduced = RichNode()
             scene.addChild(tractogramReduced)
             val timeStamp0_2 = System.nanoTime() / 1000000
