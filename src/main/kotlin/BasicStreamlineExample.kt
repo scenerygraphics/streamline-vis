@@ -1,4 +1,3 @@
-import com.esotericsoftware.minlog.Log
 import org.joml.*
 import graphics.scenery.*
 import graphics.scenery.backends.Renderer
@@ -99,29 +98,17 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
     lateinit var globalKDTree : KDTree<Vector2i>
     override fun init() {
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
-        val dataset = System.getProperty("dataset")
         val trx = System.getProperty("trx")
-        val parcellation = System.getProperty("parcels")
-
-        /*val parcel7 = System.getProperty("parcel7")
-        val parcelMesh7 = Mesh()
-        parcelMesh7.readFrom(parcel7)
-        parcelMesh7.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
-        parcelMesh7.name = "Brain area"
-        scene.addChild(parcelMesh7)*/
 
         val parcellationMesh = Mesh()
-        parcellationMesh.readFrom("C:\\Users\\EllaHirche\\OneDrive\\Desktop\\Arbeit\\Datasets\\tractography\\scenery_tractography_vis_cortex_labels.nii.gz.obj")
+        parcellationMesh.readFrom(System.getProperty("parcellationMesh"))
         parcellationMesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
         parcellationMesh.name = "Brain area"
         parcellationMesh.spatial().rotation = Quaternionf().rotationX(-Math.PI.toFloat()/2)
         parcellationMesh.children.forEach {child ->
             child.materialOrNull()?.blending = Blending(transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
-                    destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)  // print status, if there is no blending
-            val material = child.materialOrNull()
-            material
+                    destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)
         }
-        //parcellationMesh.material().
         scene.addChild(parcellationMesh)
 
 
@@ -192,17 +179,6 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         logger.info("transformation of nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
 */
 
-        //adds boxes that are used to model bounding boxes: The streamlines get selected according to which end / begin within these boxes
-        /*val cube = Box(Vector3f(8f, 8f, 8f))
-        cube.spatial().position = Vector3f(3.8f, 7.1f, -4.5f)
-        cube.name = "Brain area"
-        scene.addChild(cube)
-
-        val cube2 = Box(Vector3f(6f, 6f, 6f))
-        cube2.spatial().position = Vector3f(0f,-3f,0f)
-        cube2.name = "Brain area"
-        scene.addChild(cube2)*/
-
         val tractogram = RichNode()
         val trx1 = TRXReader.readTRX(trx)
         val scale = Vector3f()
@@ -228,7 +204,6 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         selectionVerticesOfStreamlines = verticesOfStreamlines
         displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(5000) as ArrayList<ArrayList<Vector3f>>).forEach{ streamline -> tractogram.addChild(streamline)}
 
-        //tractogram.spatial().scale = Vector3f(0.1f)
         logger.info("transformation of tractogram is ${tractogram.spatial().world}, Position is ${tractogram.spatial().worldPosition()}, Scaling is ${tractogram.spatial().worldScale()}, Rotation is ${tractogram.spatial().worldRotation()}")
         scene.addChild(tractogram)
         tractogram.name = "Whole brain tractogram"
@@ -323,7 +298,6 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
             val timeStampGeometry = System.nanoTime() / 1000000
 
             displayableStreamlines.forEach{streamline -> tractogramReduced.addChild(streamline)}
-            //tractogramReduced.spatial().scale = Vector3f(0.1f)
 
             scene.removeChild("Reduced tractogram")
             tractogramReduced.name = "Reduced tractogram"
