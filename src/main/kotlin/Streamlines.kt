@@ -99,6 +99,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
     var colorMode = ColorMode.GlobalDirection
     val verticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
     var selectionVerticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
+    var maximumStreamlineCount = 1000
     lateinit var globalKDTree : KDTree<Vector2i>
     override fun init() {
         val propertiesFile = File(this::class.java.simpleName + ".properties")
@@ -115,12 +116,13 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
         val dataset = System.getProperty("dataset")
         val trx = System.getProperty("trx")
-        val maximumStreamlineCount = System.getProperty("maxStreamlines", "2000").toInt()
+        maximumStreamlineCount = System.getProperty("maxStreamlines", "5000").toInt()
 
         logger.info("Loading volume from $dataset and TRX tractogram from $trx, will show $maximumStreamlineCount streamlines max.")
 
         val container = RichNode()
         container.spatial().rotation = Quaternionf().rotationX(-PI.toFloat()/2.0f)
+        container.name = "brain parent"
         scene.addChild(container)
 
         val parcellationMesh = Mesh()
@@ -216,9 +218,8 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         logger.info("Transform of tractogram is: ${tr.transpose()}. Scaling is $scale. Translation is $translation. Normalized rotation quaternion is $quat.")
 
 
-        trx1.streamlines.forEachIndexed { index, line -> //TODO: Decide on when to select a specific amount of streamlines: now (like line below) or later, once selection was done, metrics are calculated
+        trx1.streamlines.forEachIndexed { index, line ->
         // if using a larger dataset, insert a shuffled().take(100) before the forEachIndexed
-        //trx1.streamlines.shuffled().take(maximumStreamlineCount).forEachIndexed { index, line ->
             val vecVerticesNotCentered = ArrayList<Vector3f>(line.vertices.size / 3)
             line.vertices.toList().windowed(3, 3) { p ->
                 // X axis is inverted compared to the NIFTi coordinate system
@@ -231,7 +232,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         }
 
         selectionVerticesOfStreamlines = verticesOfStreamlines
-        displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(5000) as ArrayList<ArrayList<Vector3f>>).forEach{ streamline -> tractogram.addChild(streamline)}
+        displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>).forEach{ streamline -> tractogram.addChild(streamline)}
 
         tractogram.spatial().rotation = quat
         tractogram.spatial().position = Vector3f(0.0f, -translation.y/2.0f, translation.z) * 0.1f
@@ -308,7 +309,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         setupCameraModeSwitching()
 
         val displayStreamlines: (Scene.RaycastResult, Int, Int) -> Unit = { raycastResult, i, i2 ->
-            scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = false
+            scene.children.filter { it.name == "brain parent" }[0].children.filter { it.name == "Whole brain tractogram" } [0].visible = false
 
             var selectedArea : HasSpatial? = null
             for (match in raycastResult.matches) {
@@ -322,16 +323,16 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
             var streamlineSelection = streamlineSelectionFromPolytope(selectedArea, selectionVerticesOfStreamlines)
             val timeStampSelection = System.nanoTime() / 1000000
             selectionVerticesOfStreamlines = streamlineSelection
-            if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled().take(5000) as ArrayList<ArrayList<Vector3f>> //else scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
+            if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled().take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>> //else scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
             val tractogramReduced = RichNode()
-            scene.addChild(tractogramReduced)
+            scene.children.filter { it.name == "brain parent" }[0].addChild(tractogramReduced)
             val timeStamp0_2 = System.nanoTime() / 1000000
             val displayableStreamlines = displayableStreamlinesFromVerticesList(streamlineSelection)
             val timeStampGeometry = System.nanoTime() / 1000000
 
             displayableStreamlines.forEach{streamline -> tractogramReduced.addChild(streamline)}
 
-            scene.removeChild("Reduced tractogram")
+            scene.children.filter { it.name == "brain parent" }[0].removeChild("Reduced tractogram")
             tractogramReduced.name = "Reduced tractogram"
             logger.info("Time demand streamline selection: ${timeStampSelection-timeStamp0}, Time demand calculating geometry of streamlines: ${timeStampGeometry-timeStamp0_2}")
         }
