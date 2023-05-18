@@ -2,12 +2,13 @@ import com.esotericsoftware.minlog.Log
 import org.joml.*
 import graphics.scenery.*
 import graphics.scenery.backends.Renderer
-import graphics.scenery.geometry.Curve
+import graphics.scenery.geometry.Curve //can only be used when using the old curve code
 import graphics.scenery.numerics.Random
 import graphics.scenery.attribute.material.Material
 import graphics.scenery.attribute.spatial.HasSpatial
 import graphics.scenery.controls.behaviours.SelectCommand
 import graphics.scenery.geometry.UniformBSpline
+//import graphics.scenery.geometry.curve.Curve //needs to be used when using the curve_restructuring code
 import graphics.scenery.trx.TRXReader
 import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
@@ -22,6 +23,7 @@ import net.imglib2.algorithm.kdtree.ConvexPolytope
 import net.imglib2.algorithm.kdtree.HyperPlane
 import java.lang.Math.sqrt
 import java.nio.file.Paths
+//import graphics.scenery.geometry.curve.CurveSingleShape //needs to be used when using the curve_restructuring code
 
 /**
  * Visualizing streamlines with a basic data set.
@@ -272,6 +274,13 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
             val splineSize = catmullRom.splinePoints().size
             timeStampSplineSize = System.nanoTime()
             val geo = Curve(catmullRom, partitionAlongControlpoints = false) { triangle(splineSize) }
+            //the following outcommented code can be used for the new CurveSingleShape-Code of curve_restructuring code
+            /*val tri = listOf(
+            Vector3f(0.1f, 0.1f, 0f).times(0.1f),
+            Vector3f(0.1f, -0.1f, 0f).times(0.1f),
+            Vector3f(-0.1f, -0.1f, 0f).times(0.1f),
+            )
+            val geo = CurveSingleShape(catmullRom, partitionAlongControlpoints = false, baseShape = tri)*/
             timeStampGeo = System.nanoTime()
             geo.name = "Streamline #$index"
             geo.children.forEachIndexed { i, curveSegment ->

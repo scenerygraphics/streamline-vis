@@ -21,6 +21,8 @@ dependencies {
     implementation("org.joml:joml:1.10.4")
     implementation("net.imglib2:imglib2:5.13.0")
     api("graphics.scenery:trx-jvm:47d1732")
+    //just for test purposes - can only be used if the first line of this block is outcommented; for testing the curve_restructuring branch of Scenery
+    //implementation("com.github.scenerygraphics:scenery:curve_restructuring-SNAPSHOT")
 
     implementation(platform("org.scijava:pom-scijava:32.0.0"))
     implementation("io.scif:scifio")
