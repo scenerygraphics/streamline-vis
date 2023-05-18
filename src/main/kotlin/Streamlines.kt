@@ -23,6 +23,10 @@ import net.imglib2.algorithm.kdtree.HyperPlane
 import java.lang.Math.sqrt
 import java.nio.file.Paths
 //import graphics.scenery.geometry.curve.CurveSingleShape //needs to be used when using the curve_restructuring code
+import java.io.File
+import java.util.Properties
+import kotlin.math.PI
+import kotlin.math.sqrt
 
 /**
  * Visualizing streamlines with a basic data set.
@@ -30,7 +34,7 @@ import java.nio.file.Paths
  * @author Justin Buerger <burger@mpi-cbg.de>
  * @author Ulrik Guenther <hello@ulrik.is>
  */
-class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1280, windowHeight = 720) {
+class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, windowHeight = 720) {
 
     enum class ColorMode {
         LocalDirection,
@@ -97,8 +101,27 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
     var selectionVerticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
     lateinit var globalKDTree : KDTree<Vector2i>
     override fun init() {
+        val propertiesFile = File(this::class.java.simpleName + ".properties")
+        if(propertiesFile.exists()) {
+            val p = Properties()
+            p.load(propertiesFile.inputStream())
+            logger.info("Loaded properties from $propertiesFile:")
+            p.forEach { k, v ->
+                logger.info(" * $k=$v")
+                System.setProperty(k as String, v as String)
+            }
+        }
+
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
+        val dataset = System.getProperty("dataset")
         val trx = System.getProperty("trx")
+        val maximumStreamlineCount = System.getProperty("maxStreamlines", "2000").toInt()
+
+        logger.info("Loading volume from $dataset and TRX tractogram from $trx, will show $maximumStreamlineCount streamlines max.")
+
+        val container = RichNode()
+        container.spatial().rotation = Quaternionf().rotationX(-PI.toFloat()/2.0f)
+        scene.addChild(container)
 
         val parcellationMesh = Mesh()
         parcellationMesh.readFrom(System.getProperty("parcellationMesh"))
@@ -118,7 +141,10 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
 
         //check if we have qform code: "Q-form Code" -> if it's bigger than 0, use method 2, if "S-form Code" is bigger than 0, use method 3
         //method 2 of NIfTI for reading
-        var transform = Matrix4f()
+        logger.info("The following metadata is available:")
+        m.forEach { (t, u) -> logger.info(" * $t -> $u")  }
+
+        val transform = Matrix4f()
         if(m["Q-form Code"].toString().toFloat() > 0) { //method 2 of NIfTI for reading
             val x = m["Quaternion b parameter"].toString().toFloat()
             val y = m["Quaternion c parameter"].toString().toFloat()
@@ -145,7 +171,6 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
 
             //transformations that were given by the read metadata
             volume.spatial().rotation = quaternion
-            volume.spatial().position = offset/100.0f
             volume.spatial().scale = Vector3f(pixeldim)
 
         } else if (m["S-form Code"].toString().toFloat()>0) { //method 3 of NIfTI for reading
@@ -168,14 +193,11 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
             volume.spatial().model = transform
         }
 
-//        volume.origin = Origin.Center //works better than if we use bottom fron left as an origin
+        volume.origin = Origin.Center
         volume.colormap = Colormap.get("grays")
         volume.transferFunction = TransferFunction.ramp(0.01f, 0.5f)
-        //manual transformation which aligns the two objects (tractogram and volume) approximately
-        volume.spatial().rotation = Quaternionf().rotationX(Math.PI.toFloat()/2)
-//        volume.spatial().move(floatArrayOf(0.5F,3.5F, -4.5F))
 
-        scene.addChild(volume)
+        container.addChild(volume)
         logger.info("transformation of nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
 */
 
@@ -184,16 +206,23 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         val scale = Vector3f()
         val translation = Vector3f()
         val quat = Quaternionf()
-        trx1.header.voxelToRasMM.getScale(scale)
-        trx1.header.voxelToRasMM.getTranslation(translation)
-        trx1.header.voxelToRasMM.getNormalizedRotation(quat)
+        val tr = Matrix4f(trx1.header.voxelToRasMM)
+        tr.transpose()
 
-        logger.info("Transform of tractogram is: ${trx1.header.voxelToRasMM.transpose()}. Scaling is $scale. Translation is $translation. Normalized rotation quaternion is $quat.")
+        tr.getScale(scale)
+        tr.getTranslation(translation)
+        tr.getNormalizedRotation(quat)
 
-        trx1.streamlines.forEachIndexed { index, line ->
+        logger.info("Transform of tractogram is: ${tr.transpose()}. Scaling is $scale. Translation is $translation. Normalized rotation quaternion is $quat.")
+
+
+        trx1.streamlines.forEachIndexed { index, line -> //TODO: Decide on when to select a specific amount of streamlines: now (like line below) or later, once selection was done, metrics are calculated
+        // if using a larger dataset, insert a shuffled().take(100) before the forEachIndexed
+        //trx1.streamlines.shuffled().take(maximumStreamlineCount).forEachIndexed { index, line ->
             val vecVerticesNotCentered = ArrayList<Vector3f>(line.vertices.size / 3)
             line.vertices.toList().windowed(3, 3) { p ->
-                val v = Vector3f(p[0], p[2], p[1])
+                // X axis is inverted compared to the NIFTi coordinate system
+                val v = Vector3f(-p[0], p[1], p[2])
                 if(v.length() > 0.001f) {
                     vecVerticesNotCentered.add(v)
                 }
@@ -204,11 +233,14 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
         selectionVerticesOfStreamlines = verticesOfStreamlines
         displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(5000) as ArrayList<ArrayList<Vector3f>>).forEach{ streamline -> tractogram.addChild(streamline)}
 
+        tractogram.spatial().rotation = quat
+        tractogram.spatial().position = Vector3f(0.0f, -translation.y/2.0f, translation.z) * 0.1f
         logger.info("transformation of tractogram is ${tractogram.spatial().world}, Position is ${tractogram.spatial().worldPosition()}, Scaling is ${tractogram.spatial().worldScale()}, Rotation is ${tractogram.spatial().worldRotation()}")
-        scene.addChild(tractogram)
+        container.addChild(tractogram)
         tractogram.name = "Whole brain tractogram"
 
         globalKDTree = createKDTree(verticesOfStreamlines)
+
 
         val lightbox = Box(Vector3f(75.0f, 75.0f, 75.0f), insideNormals = true)
         lightbox.name = "Lightbox"
@@ -317,7 +349,7 @@ class BasicStreamlineExample: SceneryBase("No arms, no cookies", windowWidth = 1
     companion object {
         @JvmStatic
         fun main(args: Array<String>) {
-            BasicStreamlineExample().main()
+            Streamlines().main()
         }
 
         val baseList = listOf(
