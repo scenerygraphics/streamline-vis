@@ -1,13 +1,13 @@
 import org.joml.*
 import graphics.scenery.*
 import graphics.scenery.backends.Renderer
-import graphics.scenery.geometry.Curve //can only be used when using the old curve code
+//import graphics.scenery.geometry.Curve //can only be used when using the old curve code
 import graphics.scenery.numerics.Random
 import graphics.scenery.attribute.material.Material
 import graphics.scenery.attribute.spatial.HasSpatial
 import graphics.scenery.controls.behaviours.SelectCommand
 import graphics.scenery.geometry.UniformBSpline
-//import graphics.scenery.geometry.curve.Curve //needs to be used when using the curve_restructuring code
+import graphics.scenery.geometry.curve.Curve //needs to be used when using the curve_restructuring code
 import graphics.scenery.trx.TRXReader
 import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
@@ -20,13 +20,11 @@ import net.imglib2.RealPoint
 import net.imglib2.algorithm.kdtree.ClipConvexPolytopeKDTree
 import net.imglib2.algorithm.kdtree.ConvexPolytope
 import net.imglib2.algorithm.kdtree.HyperPlane
-import java.lang.Math.sqrt
 import java.nio.file.Paths
-//import graphics.scenery.geometry.curve.CurveSingleShape //needs to be used when using the curve_restructuring code
+import graphics.scenery.geometry.curve.CurveSingleShape //needs to be used when using the curve_restructuring code
 import java.io.File
 import java.util.Properties
-import kotlin.math.PI
-import kotlin.math.sqrt
+import kotlin.math.*
 
 /**
  * Visualizing streamlines with a basic data set.
@@ -67,11 +65,22 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         val clipkdtree = ClipConvexPolytopeKDTree(localKDTree)
         clipkdtree.clip(polytope)
 
+        var avFiberLength = 0f
+        var maxLength = 0f
+        var numberStreamlines = clipkdtree.insideNodes.count()
         clipkdtree.insideNodes.forEach { node ->
             val index = node.get().x
             streamlineSelection.add(streamlines[index])
+
+           /*var lengthStreamline = 0f
+            for (i in 0 until streamlines[index].size-1){
+                lengthStreamline += streamlines[index][i].distance(streamlines[index][i+1])
+            }
+            maxLength = max(lengthStreamline, maxLength)
+            avFiberLength += lengthStreamline/numberStreamlines*/
+
         }
-        logger.info("Streamline selection contains ${streamlineSelection.size} streamlines")
+        logger.info("Streamline selection contains ${streamlineSelection.size} streamlines with average fiber length $avFiberLength, max Streamline-length = $maxLength")
         val timeStampClipTree = System.nanoTime() / 1000000
         logger.info("Time polytope: ${timeStampPolytope-timeStamp0}, Time kdTree: ${timeStampKDTree-timeStampPolytope}, Time clipTree: ${timeStampClipTree-timeStampKDTree}")
 
@@ -125,16 +134,29 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         container.name = "brain parent"
         scene.addChild(container)
 
+        val tractogramContainer = RichNode()
+        tractogramContainer.name = "tractogram parent"
+        container.addChild(tractogramContainer)
+
         val parcellationMesh = Mesh()
         parcellationMesh.readFrom(System.getProperty("parcellationMesh"))
         parcellationMesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
-        parcellationMesh.name = "Brain area"
-        parcellationMesh.spatial().rotation = Quaternionf().rotationX(-Math.PI.toFloat()/2)
+        parcellationMesh.name = "Brain areas"
         parcellationMesh.children.forEach {child ->
             child.materialOrNull()?.blending = Blending(transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
                     destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)
         }
-        scene.addChild(parcellationMesh)
+        tractogramContainer.addChild(parcellationMesh)
+
+        /*val parcellationMeshLeft = Mesh()
+        parcellationMeshLeft.readFrom(System.getProperty("parcellationMeshLeft"))
+        parcellationMeshLeft.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
+        parcellationMeshLeft.name = "Brain areas left"
+        parcellationMeshLeft.children.forEach {child ->
+            child.materialOrNull()?.blending = Blending(transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
+                destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)
+        }
+        tractogramContainer.addChild(parcellationMeshLeft)*/
 
 
         //the following outcommented code loads the nifti from file; Not needed in this example for streamline selection
@@ -234,10 +256,10 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         selectionVerticesOfStreamlines = verticesOfStreamlines
         displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>).forEach{ streamline -> tractogram.addChild(streamline)}
 
-        tractogram.spatial().rotation = quat
-        tractogram.spatial().position = Vector3f(0.0f, -translation.y/2.0f, translation.z) * 0.1f
+        tractogramContainer.spatial().rotation = quat
+        tractogramContainer.spatial().position = Vector3f(0.0f, -translation.y/2.0f, translation.z) * 0.1f
         logger.info("transformation of tractogram is ${tractogram.spatial().world}, Position is ${tractogram.spatial().worldPosition()}, Scaling is ${tractogram.spatial().worldScale()}, Rotation is ${tractogram.spatial().worldRotation()}")
-        container.addChild(tractogram)
+        tractogramContainer.addChild(tractogram)
         tractogram.name = "Whole brain tractogram"
 
         globalKDTree = createKDTree(verticesOfStreamlines)
@@ -274,32 +296,76 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         var timeStampSplineSize = 0.toLong()
         var timeStampGeo = 0.toLong()
         logger.info("Display of ${listVertices.size} streamlines")
+        var maxLen = 0f
+        var maxCurve = 0f
+        var maxAvCurve = 0f
         val streamlines = List<Node>(listVertices.size){index ->
             val vecVerticesNotCentered = listVertices[index]
             val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
             val catmullRom = UniformBSpline(vecVerticesNotCentered, 2)
             timeStamp0 = System.nanoTime()
-            val splineSize = catmullRom.splinePoints().size
+            //val splineSize = catmullRom.splinePoints().size
             timeStampSplineSize = System.nanoTime()
-            val geo = Curve(catmullRom, partitionAlongControlpoints = false) { triangle(splineSize) }
+            //val geo = Curve(catmullRom, partitionAlongControlpoints = false) { triangle(splineSize) }
             //the following outcommented code can be used for the new CurveSingleShape-Code of curve_restructuring code
-            /*val tri = listOf(
+            val tri = listOf(
             Vector3f(0.1f, 0.1f, 0f).times(0.1f),
             Vector3f(0.1f, -0.1f, 0f).times(0.1f),
             Vector3f(-0.1f, -0.1f, 0f).times(0.1f),
             )
-            val geo = CurveSingleShape(catmullRom, partitionAlongControlpoints = false, baseShape = tri)*/
+            val geo = CurveSingleShape(catmullRom, partitionAlongControlpoints = false, baseShape = tri)
             timeStampGeo = System.nanoTime()
             geo.name = "Streamline #$index"
+            var lengthGeo = 0f
+            var sumCurvature = 0f
             geo.children.forEachIndexed { i, curveSegment ->
-                val localColor = (vecVerticesNotCentered[i+1] - (vecVerticesNotCentered[i] ?: Vector3f(0.0f))).normalize()
+                val verticesDiff = vecVerticesNotCentered[i+1] - (vecVerticesNotCentered[i] ?: Vector3f(0.0f))
+                val localColor = (verticesDiff).normalize()
                 curveSegment.materialOrNull()?.diffuse = when(colorMode) {
                     ColorMode.LocalDirection -> (localColor + Vector3f(0.5f)) / 2.0f
                     ColorMode.GlobalDirection -> color
                 }
             }
+
+            val streamlineSize = vecVerticesNotCentered.size
+            var prevLocalLength = 0f
+            var minLocalCurve = 10000f
+            var maxLocalCurve = 0f
+            vecVerticesNotCentered.forEachIndexed{i, vertex ->
+                val localLen : Float
+                if (i<(streamlineSize-1)) localLen = vecVerticesNotCentered[i+1].distance(vecVerticesNotCentered[i]) else localLen = 0f
+                lengthGeo += localLen
+
+                val diffTangent: Vector3f
+                if (i<(streamlineSize-1)&&i>0) {
+                    diffTangent = geo.frames[i+1].tangent - geo.frames[i-1].tangent
+                    val derivTangent = diffTangent/(localLen + prevLocalLength) //not local length, but length between i-1 and i+1 vertices
+                    val localCurvature = derivTangent.dot(geo.frames[i].normal).absoluteValue
+                    sumCurvature += localCurvature
+                    maxLocalCurve = max(maxLocalCurve, localCurvature)
+                    minLocalCurve = min(minLocalCurve, localCurvature)
+                }
+                prevLocalLength = localLen
+            }
+            geo.metadata.put("length", lengthGeo)
+            maxLen = max(maxLen, lengthGeo)
+            geo.metadata.put("average curvature", sumCurvature/(streamlineSize-2))
+            geo.metadata.put("maximum curvature", maxLocalCurve)
+            geo.metadata.put("minimum curvature", minLocalCurve)
+            maxAvCurve = max(maxAvCurve, sumCurvature/(streamlineSize-2))
+            maxCurve = max(maxCurve, maxLocalCurve)
             geo
         }
+
+        /*val maxCurvatureFilter = 0.05f
+        streamlines.forEachIndexed{i, streamline ->
+            var curve = streamline.metadata.get("maximum curvature")
+            var curveFloat = curve.toString().toFloat()
+            if(curveFloat>maxCurvatureFilter){
+                streamline.visible = false
+            }
+        }*/
+        logger.info("Maximum curvature is $maxCurve, maximum average curve is $maxAvCurve Maximum Fiber length is $maxLen")
         logger.info("Time for splineSize: ${(timeStampSplineSize-timeStamp0)*listVertices.size/1000000}, Time for creating curve-geometry: ${(timeStampGeo-timeStampSplineSize)*listVertices.size/1000000}")
         return streamlines
     }
@@ -309,7 +375,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         setupCameraModeSwitching()
 
         val displayStreamlines: (Scene.RaycastResult, Int, Int) -> Unit = { raycastResult, i, i2 ->
-            scene.children.filter { it.name == "brain parent" }[0].children.filter { it.name == "Whole brain tractogram" } [0].visible = false
+            scene.children.filter { it.name == "brain parent" }[0].children.filter { it.name == "tractogram parent" } [0].children.filter { it.name == "Whole brain tractogram" } [0].visible = false
 
             var selectedArea : HasSpatial? = null
             for (match in raycastResult.matches) {
@@ -325,14 +391,14 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
             selectionVerticesOfStreamlines = streamlineSelection
             if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled().take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>> //else scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
             val tractogramReduced = RichNode()
-            scene.children.filter { it.name == "brain parent" }[0].addChild(tractogramReduced)
+            scene.children.filter { it.name == "brain parent" }[0].children.filter { it.name == "tractogram parent" } [0].addChild(tractogramReduced)
             val timeStamp0_2 = System.nanoTime() / 1000000
             val displayableStreamlines = displayableStreamlinesFromVerticesList(streamlineSelection)
             val timeStampGeometry = System.nanoTime() / 1000000
 
             displayableStreamlines.forEach{streamline -> tractogramReduced.addChild(streamline)}
 
-            scene.children.filter { it.name == "brain parent" }[0].removeChild("Reduced tractogram")
+            scene.children.filter { it.name == "brain parent" }[0].children.filter { it.name == "tractogram parent" } [0].removeChild("Reduced tractogram")
             tractogramReduced.name = "Reduced tractogram"
             logger.info("Time demand streamline selection: ${timeStampSelection-timeStamp0}, Time demand calculating geometry of streamlines: ${timeStampGeometry-timeStamp0_2}")
         }
