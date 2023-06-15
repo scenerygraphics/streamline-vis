@@ -1,30 +1,37 @@
-import org.joml.*
-import graphics.scenery.*
-import graphics.scenery.backends.Renderer
 //import graphics.scenery.geometry.Curve //can only be used when using the old curve code
-import graphics.scenery.numerics.Random
+
+import com.esotericsoftware.minlog.Log
+import graphics.scenery.*
 import graphics.scenery.attribute.material.Material
 import graphics.scenery.attribute.spatial.HasSpatial
+import graphics.scenery.backends.Renderer
 import graphics.scenery.controls.behaviours.SelectCommand
 import graphics.scenery.geometry.UniformBSpline
-import graphics.scenery.geometry.curve.Curve //needs to be used when using the curve_restructuring code
+import graphics.scenery.geometry.curve.CurveSingleShape
+import graphics.scenery.numerics.Random
+import graphics.scenery.primitives.Line
 import graphics.scenery.trx.TRXReader
 import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
 import graphics.scenery.utils.extensions.times
-import graphics.scenery.volumes.Colormap
-import graphics.scenery.volumes.TransferFunction
-import graphics.scenery.volumes.Volume
 import net.imglib2.KDTree
+import net.imglib2.Localizable
 import net.imglib2.RealPoint
 import net.imglib2.algorithm.kdtree.ClipConvexPolytopeKDTree
 import net.imglib2.algorithm.kdtree.ConvexPolytope
 import net.imglib2.algorithm.kdtree.HyperPlane
-import java.nio.file.Paths
-import graphics.scenery.geometry.curve.CurveSingleShape //needs to be used when using the curve_restructuring code
+import net.imglib2.mesh.alg.MeshCursor
+import net.imglib2.mesh.obj.nio.BufferMesh
+import net.imglib2.position.FunctionRandomAccessible
+import net.imglib2.type.logic.BitType
+import org.joml.*
 import java.io.File
-import java.util.Properties
+import java.io.IOException
+import java.lang.Math
+import java.util.*
+import java.util.function.BiConsumer
 import kotlin.math.*
+
 
 /**
  * Visualizing streamlines with a basic data set.
@@ -39,9 +46,24 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         GlobalDirection
     }
 
+    /**
+     * Determines Streamlines that start or end within the Bounding box of a given 3-polytope
+     *
+     * @param selectedArea Node that holds the 3-Polytope which defines the area in which Streamlines have to start of finish to be selected
+     * @param streamlines All streamlines from which should be selected
+     * @return List of selected Streamlines (List of List of Points in a single streamline) that start or finish in the given polytope
+     * */
     fun streamlineSelectionFromPolytope(selectedArea: HasSpatial?, streamlines: ArrayList<ArrayList<Vector3f>>): ArrayList<ArrayList<Vector3f>>{
-        //calculations of the hyperplane distances (second argument): normal vector *(point product) point(here translation+extend of the bounding box/normal vector length (here 1 or -1)
+        //TODO: Get rid of the Hyperplane-calculation as soon as there is a more precise way of determining the selected area / streamlines to be selected
+        /*
+        * Calculation of the Hyperplanes that form the bounding box.
+        * The Hyperplanes form the polytope which is input to the following algorithm.
+        * */
+        // calculations of the hyperplane distances (second argument):
+        // normal vector *(point product) point
+        // here: translation+extend of the bounding box/normal vector length (here: 1 or -1)
         val timeStamp0 = System.nanoTime() / 1000000
+
         val cubePos = selectedArea?.spatial()?.position ?: throw NullPointerException()
         val boundingBox = selectedArea.boundingBox ?: throw NullPointerException()
         val hyperplane1 = HyperPlane(0.0,0.0,-1.0, boundingBox.max.z.toDouble().plus(cubePos.z).times(-1))
@@ -51,42 +73,51 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         val hyperplane5 = HyperPlane(0.0, -1.0,0.0, boundingBox.max.y.toDouble().plus(cubePos.y).times(-1))
         val hyperplane6 = HyperPlane(0.0, 1.0,0.0, boundingBox.min.y.toDouble().plus(cubePos.y))
         val polytope = ConvexPolytope(hyperplane1, hyperplane2, hyperplane3, hyperplane4, hyperplane5, hyperplane6)
+
         val timeStampPolytope = System.nanoTime() / 1000000
 
+        /*
+        * Create KD-tree as the data structure holding all points where streamlines start or end.
+        * A new KD-tree only gets created, if the initial amount of streamlines already got reduced,
+        * since an initial KD-tree gets created in init().
+        * */
         val localKDTree : KDTree<Vector2i>
         if(streamlines == verticesOfStreamlines){
             localKDTree = globalKDTree
         }else{
             localKDTree = createKDTree(streamlines)
         }
+
         val timeStampKDTree = System.nanoTime() / 1000000
 
+        /*
+        * Create and use data structure to determine inside points of a polytope.
+        * The resulting points are translated back to the streamlines, which are returned as a list of vertices.
+        * */
         val streamlineSelection = ArrayList<ArrayList<Vector3f>>()
         val clipkdtree = ClipConvexPolytopeKDTree(localKDTree)
         clipkdtree.clip(polytope)
 
-        var avFiberLength = 0f
-        var maxLength = 0f
-        var numberStreamlines = clipkdtree.insideNodes.count()
         clipkdtree.insideNodes.forEach { node ->
             val index = node.get().x
             streamlineSelection.add(streamlines[index])
-
-           /*var lengthStreamline = 0f
-            for (i in 0 until streamlines[index].size-1){
-                lengthStreamline += streamlines[index][i].distance(streamlines[index][i+1])
-            }
-            maxLength = max(lengthStreamline, maxLength)
-            avFiberLength += lengthStreamline/numberStreamlines*/
-
         }
-        logger.info("Streamline selection contains ${streamlineSelection.size} streamlines with average fiber length $avFiberLength, max Streamline-length = $maxLength")
+
+        logger.info("Streamline selection contains ${streamlineSelection.size} streamlines.")
         val timeStampClipTree = System.nanoTime() / 1000000
         logger.info("Time polytope: ${timeStampPolytope-timeStamp0}, Time kdTree: ${timeStampKDTree-timeStampPolytope}, Time clipTree: ${timeStampClipTree-timeStampKDTree}")
 
         return streamlineSelection
     }
 
+    /**
+     * Creates a imglib2 KDTree datastructure that only contains all starting and end points of a given streamline list.
+     *
+     * @param streamlines List of list of vertices contained in a single streamline.
+     * Only the first and last vertex of every streamline is stored inside the KD-tree, because these are the points
+     * which need to efficiently be searched.
+     * @return KD-tree data structure holding all points where a streamline either starts or ends
+    * */
     fun createKDTree(streamlines: ArrayList<ArrayList<Vector3f>>) : KDTree<Vector2i>{
         val listLength = streamlines.size*2
         val valuesList = List(listLength){ index ->
@@ -110,6 +141,12 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
     var selectionVerticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
     var maximumStreamlineCount = 1000
     lateinit var globalKDTree : KDTree<Vector2i>
+    /**
+     * Sets up the initial scene and reads all relevant parameters from the configuration.
+     * The initial scene in particular contains a tractogram, read from a .trx file, a parcellation,
+     * read from an .obj file, which holds meshes of relevant brain regions and a volume,
+     * read from a .nifti file, which shows the whole brain.
+     * */
     override fun init() {
         val propertiesFile = File(this::class.java.simpleName + ".properties")
         if(propertiesFile.exists()) {
@@ -123,6 +160,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         }
 
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
+
         val dataset = System.getProperty("dataset")
         val trx = System.getProperty("trx")
         maximumStreamlineCount = System.getProperty("maxStreamlines", "5000").toInt()
@@ -140,24 +178,30 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
 
         val parcellationMesh = Mesh()
         parcellationMesh.readFrom(System.getProperty("parcellationMesh"))
-        parcellationMesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
         parcellationMesh.name = "Brain areas"
+        //var first = true
         parcellationMesh.children.forEach {child ->
-            child.materialOrNull()?.blending = Blending(transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
+            child.materialOrNull()?.blending =
+                Blending(transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
                     destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)
+
+            //use the first Mesh for tests of streamline selection in general, but especially trials of more precise selections
+            /*child as Mesh
+            val childMeshImageJ = MeshConverter.toImageJ(child) //perhaps try waterproofedness, Duplicates
+            if(first){
+                first = false
+            }else{
+                child.visible = false
+            }*/
         }
+
         tractogramContainer.addChild(parcellationMesh)
-
-        /*val parcellationMeshLeft = Mesh()
-        parcellationMeshLeft.readFrom(System.getProperty("parcellationMeshLeft"))
-        parcellationMeshLeft.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
-        parcellationMeshLeft.name = "Brain areas left"
-        parcellationMeshLeft.children.forEach {child ->
-            child.materialOrNull()?.blending = Blending(transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
-                destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)
-        }
-        tractogramContainer.addChild(parcellationMeshLeft)*/
-
+        //val firstMesh = parcellationMesh.children[0] as Mesh
+        //converson to imglib2 needs to be done, if streamline selection is done with functionalities of ImageJ
+        //val testMesh = MeshConverter.toImageJ(firstMesh)
+        //TODO: check watertightness and duplicates
+        //testPointCloud(testMesh, tractogramContainer)
+        parcellationMesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
 
         //the following outcommented code loads the nifti from file; Not needed in this example for streamline selection
         /*val volume = Volume.fromPath(Paths.get(dataset), hub)
@@ -237,7 +281,8 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         tr.getTranslation(translation)
         tr.getNormalizedRotation(quat)
 
-        logger.info("Transform of tractogram is: ${tr.transpose()}. Scaling is $scale. Translation is $translation. Normalized rotation quaternion is $quat.")
+        logger.info("Transform of tractogram is: ${tr.transpose()}. Scaling is $scale. Translation is $translation. " +
+                "Normalized rotation quaternion is $quat.")
 
 
         trx1.streamlines.forEachIndexed { index, line ->
@@ -254,11 +299,16 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         }
 
         selectionVerticesOfStreamlines = verticesOfStreamlines
-        displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>).forEach{ streamline -> tractogram.addChild(streamline)}
+        displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled()
+            .take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
+            .forEach{ streamline -> tractogram.addChild(streamline)}
 
         tractogramContainer.spatial().rotation = quat
         tractogramContainer.spatial().position = Vector3f(0.0f, -translation.y/2.0f, translation.z) * 0.1f
-        logger.info("transformation of tractogram is ${tractogram.spatial().world}, Position is ${tractogram.spatial().worldPosition()}, Scaling is ${tractogram.spatial().worldScale()}, Rotation is ${tractogram.spatial().worldRotation()}")
+        logger.info("transformation of tractogram is ${tractogram.spatial().world}, " +
+                "Position is ${tractogram.spatial().worldPosition()}, " +
+                "Scaling is ${tractogram.spatial().worldScale()}, " +
+                "Rotation is ${tractogram.spatial().worldRotation()}")
         tractogramContainer.addChild(tractogram)
         tractogram.name = "Whole brain tractogram"
 
@@ -291,7 +341,15 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         scene.addChild(cam)
     }
 
-    fun displayableStreamlinesFromVerticesList(listVertices: ArrayList<ArrayList<Vector3f>>):List<Node> {
+    /**
+     * Calculates a curve representation for each streamline and determines a geometry that can be rendered.
+     * In the process, metrics like fiber length and curvature of the streamlines are calculated and stored
+     * into metadata.
+     *
+     * @param listVertices List of streamlines (which are lists of vertices / vector3f-points)
+     * @return List of streamline scene-objects that can be rendered
+     * */
+    fun displayableStreamlinesFromVerticesList(listVertices: ArrayList<ArrayList<Vector3f>>) : List<Node> {
         var timeStamp0 = 0.toLong()
         var timeStampSplineSize = 0.toLong()
         var timeStampGeo = 0.toLong()
@@ -301,6 +359,11 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         var maxAvCurve = 0f
         val streamlines = List<Node>(listVertices.size){index ->
             val vecVerticesNotCentered = listVertices[index]
+
+            //display of streamlines with lines is currently not possible, since it's even less efficient than creating curves
+            /*val geo = Line(transparent = false)
+            geo.addPoints(vecVerticesNotCentered)*/
+
             val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
             val catmullRom = UniformBSpline(vecVerticesNotCentered, 2)
             timeStamp0 = System.nanoTime()
@@ -318,11 +381,14 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
             geo.name = "Streamline #$index"
             var lengthGeo = 0f
             var sumCurvature = 0f
+
+            //there is only one curveSegment per Streamline if CurveSingleShape is used,
+            // thus local color isn't actually local anymore; Filler until we implement color conventions
             geo.children.forEachIndexed { i, curveSegment ->
-                val verticesDiff = vecVerticesNotCentered[i+1] - (vecVerticesNotCentered[i] ?: Vector3f(0.0f))
+                val verticesDiff = vecVerticesNotCentered[i+1].minus(vecVerticesNotCentered[i] ?: Vector3f(0.0f))
                 val localColor = (verticesDiff).normalize()
                 curveSegment.materialOrNull()?.diffuse = when(colorMode) {
-                    ColorMode.LocalDirection -> (localColor + Vector3f(0.5f)) / 2.0f
+                    ColorMode.LocalDirection -> (localColor.plus(Vector3f(0.5f))) / 2.0f
                     ColorMode.GlobalDirection -> color
                 }
             }
@@ -339,7 +405,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
                 val diffTangent: Vector3f
                 if (i<(streamlineSize-1)&&i>0) {
                     diffTangent = geo.frames[i+1].tangent - geo.frames[i-1].tangent
-                    val derivTangent = diffTangent/(localLen + prevLocalLength) //not local length, but length between i-1 and i+1 vertices
+                    val derivTangent = diffTangent/(localLen + prevLocalLength)
                     val localCurvature = derivTangent.dot(geo.frames[i].normal).absoluteValue
                     sumCurvature += localCurvature
                     maxLocalCurve = max(maxLocalCurve, localCurvature)
@@ -366,42 +432,65 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
             }
         }*/
         logger.info("Maximum curvature is $maxCurve, maximum average curve is $maxAvCurve Maximum Fiber length is $maxLen")
-        logger.info("Time for splineSize: ${(timeStampSplineSize-timeStamp0)*listVertices.size/1000000}, Time for creating curve-geometry: ${(timeStampGeo-timeStampSplineSize)*listVertices.size/1000000}")
+        logger.info("Time for splineSize: ${(timeStampSplineSize-timeStamp0)*listVertices.size/1000000}, " +
+                "Time for creating curve-geometry: ${(timeStampGeo-timeStampSplineSize)*listVertices.size/1000000}")
         return streamlines
     }
 
+    /**
+     * Handles the input: If there is a double click on mesh / brain region, a streamline selection is done and
+     * rendered instead of a whole tractogram
+     * */
     override fun inputSetup() {
         super.inputSetup()
         setupCameraModeSwitching()
 
+        /*
+        * Defines the method which gets called as soon as there is a double click.
+        * The closest brainregion to the click event will get selected and thus serves as the streamline selection criteria.
+        * */
         val displayStreamlines: (Scene.RaycastResult, Int, Int) -> Unit = { raycastResult, i, i2 ->
-            scene.children.filter { it.name == "brain parent" }[0].children.filter { it.name == "tractogram parent" } [0].children.filter { it.name == "Whole brain tractogram" } [0].visible = false
+            scene.children.filter { it.name == "brain parent" }[0].children
+                .filter { it.name == "tractogram parent" } [0].children
+                .filter { it.name == "Whole brain tractogram" } [0].visible = false
 
             var selectedArea : HasSpatial? = null
             for (match in raycastResult.matches) {
-                if(match.node.name.startsWith("grp")){ //if(match.node.name == "Brain area"){
+                if(match.node.name.startsWith("grp")){
                     selectedArea = match.node as HasSpatial
                     break
                 }
             }
 
             val timeStamp0 = System.nanoTime() / 1000000
+
             var streamlineSelection = streamlineSelectionFromPolytope(selectedArea, selectionVerticesOfStreamlines)
+
             val timeStampSelection = System.nanoTime() / 1000000
+
             selectionVerticesOfStreamlines = streamlineSelection
-            if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled().take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>> //else scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
+            if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled()
+                .take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
+            //else scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
             val tractogramReduced = RichNode()
-            scene.children.filter { it.name == "brain parent" }[0].children.filter { it.name == "tractogram parent" } [0].addChild(tractogramReduced)
+            scene.children.filter { it.name == "brain parent" }[0].children
+                .filter { it.name == "tractogram parent" } [0].addChild(tractogramReduced)
+
             val timeStamp0_2 = System.nanoTime() / 1000000
+
             val displayableStreamlines = displayableStreamlinesFromVerticesList(streamlineSelection)
+
             val timeStampGeometry = System.nanoTime() / 1000000
 
             displayableStreamlines.forEach{streamline -> tractogramReduced.addChild(streamline)}
 
-            scene.children.filter { it.name == "brain parent" }[0].children.filter { it.name == "tractogram parent" } [0].removeChild("Reduced tractogram")
+            scene.children.filter { it.name == "brain parent" }[0].children
+                .filter { it.name == "tractogram parent" } [0].removeChild("Reduced tractogram")
             tractogramReduced.name = "Reduced tractogram"
-            logger.info("Time demand streamline selection: ${timeStampSelection-timeStamp0}, Time demand calculating geometry of streamlines: ${timeStampGeometry-timeStamp0_2}")
+            logger.info("Time demand streamline selection: ${timeStampSelection-timeStamp0}, " +
+                    "Time demand calculating geometry of streamlines: ${timeStampGeometry-timeStamp0_2}")
         }
+
         renderer?.let { r ->
             inputHandler?.addBehaviour(
                 "selectStreamlines", SelectCommand(
