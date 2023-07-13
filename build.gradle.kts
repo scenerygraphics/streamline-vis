@@ -13,6 +13,8 @@ repositories {
     mavenCentral()
     maven("https://maven.scijava.org/content/groups/public")
     maven("https://jitpack.io")
+    //manages local dependencies that are used in this project
+    mavenLocal()
 }
 
 dependencies {
@@ -20,8 +22,10 @@ dependencies {
     api("org.slf4j:slf4j-simple:1.7.36")
     implementation("org.joml:joml:1.10.4")
     implementation("net.imglib2:imglib2:5.13.0")
+    //used for the mesh implementation that is currently used for the point-test
+    implementation("net.imglib2:imglib2-mesh:1.0.0-SNAPSHOT")
     api("graphics.scenery:trx-jvm:47d1732")
-    //just for test purposes - can only be used if the first line of this block is outcommented; for testing the curve_restructuring branch of Scenery
+    //branch with new Curve implementation, that offers better curve metrics and will be used in future
     //implementation("com.github.scenerygraphics:scenery:curve_restructuring-SNAPSHOT")
 
     implementation(platform("org.scijava:pom-scijava:32.0.0"))
