@@ -1,22 +1,40 @@
-import org.joml.*
+//import graphics.scenery.geometry.Curve //can only be used when using the old curve code
+
+import com.esotericsoftware.minlog.Log
 import graphics.scenery.*
-import graphics.scenery.backends.Renderer
-import graphics.scenery.geometry.Curve
-import graphics.scenery.numerics.Random
 import graphics.scenery.attribute.material.Material
+import graphics.scenery.attribute.spatial.HasSpatial
+import graphics.scenery.backends.Renderer
+import graphics.scenery.controls.behaviours.SelectCommand
+import graphics.scenery.geometry.Curve
 import graphics.scenery.geometry.UniformBSpline
+//import graphics.scenery.geometry.curve.CurveSingleShape
+import graphics.scenery.numerics.Random
+import graphics.scenery.primitives.Line
 import graphics.scenery.trx.TRXReader
 import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
 import graphics.scenery.utils.extensions.times
-import graphics.scenery.volumes.Colormap
-import graphics.scenery.volumes.TransferFunction
-import graphics.scenery.volumes.Volume
+import net.imglib2.KDTree
+import net.imglib2.Localizable
+import net.imglib2.RealPoint
+import net.imglib2.algorithm.kdtree.ClipConvexPolytopeKDTree
+import net.imglib2.algorithm.kdtree.ConvexPolytope
+import net.imglib2.algorithm.kdtree.HyperPlane
+import net.imglib2.mesh.alg.InteriorPointTest
+import net.imglib2.mesh.alg.MeshCursor
+import net.imglib2.mesh.obj.nio.BufferMesh
+import net.imglib2.position.FunctionRandomAccessible
+import net.imglib2.type.logic.BitType
+import org.joml.*
 import java.io.File
-import java.nio.file.Paths
-import java.util.Properties
-import kotlin.math.PI
-import kotlin.math.sqrt
+import java.io.IOException
+import java.lang.Math
+import java.util.*
+import java.util.function.BiConsumer
+import kotlin.collections.ArrayList
+import kotlin.math.*
+
 
 /**
  * Visualizing streamlines with a basic data set.
@@ -32,6 +50,15 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
     }
 
     var colorMode = ColorMode.GlobalDirection
+    val verticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
+    var selectionVerticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
+    var maximumStreamlineCount = 1000
+    /**
+     * Sets up the initial scene and reads all relevant parameters from the configuration.
+     * The initial scene in particular contains a tractogram, read from a .trx file, a parcellation,
+     * read from an .obj file, which holds meshes of relevant brain regions and a volume,
+     * read from a .nifti file, which shows the whole brain.
+     * */
     override fun init() {
         val propertiesFile = File(this::class.java.simpleName + ".properties")
         if(propertiesFile.exists()) {
@@ -45,17 +72,24 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         }
 
         renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
+
         val dataset = System.getProperty("dataset")
         val trx = System.getProperty("trx")
-        val maximumStreamlineCount = System.getProperty("maxStreamlines", "2000").toInt()
+        maximumStreamlineCount = System.getProperty("maxStreamlines", "5000").toInt()
 
         logger.info("Loading volume from $dataset and TRX tractogram from $trx, will show $maximumStreamlineCount streamlines max.")
 
         val container = RichNode()
         container.spatial().rotation = Quaternionf().rotationX(-PI.toFloat()/2.0f)
+        container.name = "brain parent"
         scene.addChild(container)
 
-        val volume = Volume.fromPath(Paths.get(dataset), hub)
+        val tractogramContainer = RichNode()
+        tractogramContainer.name = "tractogram parent"
+        container.addChild(tractogramContainer)
+
+        //the following outcommented code loads the nifti from file; Not needed in this example for streamline selection
+        /*val volume = Volume.fromPath(Paths.get(dataset), hub)
         val m = volume.metadata
 
         //check if we have qform code: "Q-form Code" -> if it's bigger than 0, use method 2, if "S-form Code" is bigger than 0, use method 3
@@ -118,8 +152,9 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
 
         container.addChild(volume)
         logger.info("transformation of nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
+*/
 
-        val tractogram = RichNode()
+        //val tractogram = RichNode()
         val trx1 = TRXReader.readTRX(trx)
         val scale = Vector3f()
         val translation = Vector3f()
@@ -131,10 +166,11 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         tr.getTranslation(translation)
         tr.getNormalizedRotation(quat)
 
-        logger.info("Transform of tractogram is: ${tr.transpose()}. Scaling is $scale. Translation is $translation. Normalized rotation quaternion is $quat.")
+        logger.info("Transform of tractogram is: ${tr.transpose()}. Scaling is $scale. Translation is $translation. " +
+                "Normalized rotation quaternion is $quat.")
 
+        trx1.streamlines.forEachIndexed { index, line ->
         // if using a larger dataset, insert a shuffled().take(100) before the forEachIndexed
-        trx1.streamlines.shuffled().take(maximumStreamlineCount).forEachIndexed { index, line ->
             val vecVerticesNotCentered = ArrayList<Vector3f>(line.vertices.size / 3)
             line.vertices.toList().windowed(3, 3) { p ->
                 // X axis is inverted compared to the NIFTi coordinate system
@@ -143,28 +179,51 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
                     vecVerticesNotCentered.add(v)
                 }
             }
-
-            val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
-
-            val catmullRom = UniformBSpline(vecVerticesNotCentered, 10)
-            val splineSize = catmullRom.splinePoints().size
-            val geo = Curve(catmullRom, partitionAlongControlpoints = false) { triangle(splineSize) }
-            geo.name = "Streamline #$index"
-            geo.children.forEachIndexed { i, curveSegment ->
-                val localColor = ((vecVerticesNotCentered.getOrNull(i+1) ?: Vector3f()) - (vecVerticesNotCentered.getOrNull(i) ?: Vector3f(0.0f))).normalize()
-                curveSegment.materialOrNull()?.diffuse = when(colorMode) {
-                    ColorMode.LocalDirection -> (localColor + Vector3f(0.5f)) / 2.0f
-                    ColorMode.GlobalDirection -> color
-                }
-            }
-            tractogram.addChild(geo)
+            verticesOfStreamlines.add(vecVerticesNotCentered.map { it.mul(0.1f) } as ArrayList<Vector3f>) //transform tractogram, so the brain areas don't have to be "scaled" for streamline selection;
         }
 
-        tractogram.spatial().scale = scale * 0.1f
-        tractogram.spatial().rotation = quat
-        tractogram.spatial().position = Vector3f(0.0f, -translation.y/2.0f, translation.z) * 0.1f
-        logger.info("transformation of tractogram is ${tractogram.spatial().world}, Position is ${tractogram.spatial().worldPosition()}, Scaling is ${tractogram.spatial().worldScale()}, Rotation is ${tractogram.spatial().worldRotation()}")
-        container.addChild(tractogram)
+        /*
+        * Reads in the parcellation from the system. Sets a name for the brain regions which can be used in the user
+        * interaction to check, whether selected objects are brain regions. Set the brain regions to be transparent.
+        * */
+        val parcellationMesh = Mesh()
+        parcellationMesh.readFrom(System.getProperty("parcellationMesh"))
+        parcellationMesh.name = "Brain areas"
+
+        parcellationMesh.children.forEach {child ->
+            child.materialOrNull()?.blending =
+                Blending(transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
+                    destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)
+        }
+
+        //tractogramContainer.addChild(parcellationMesh) //usually is used to add all the brain region meshes to the container, if we don't only have a single test mesh
+        //Test case: only display the streamlines that start or end within the test mesh
+        val testMesh = parcellationMesh.children[0] as Mesh
+        tractogramContainer.addChild(testMesh)
+        val selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(testMesh, verticesOfStreamlines)
+        val tractogram = RichNode()
+        //TODO: handle an empty selectedStreamline list
+        displayableStreamlinesFromVerticesList(selectedStreamlines.shuffled()
+            .take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
+            .forEach{ streamline -> tractogram.addChild(streamline)}
+        parcellationMesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
+        testMesh.spatial().scale = Vector3f(0.1f,0.1f,0.1f)
+
+        selectionVerticesOfStreamlines = verticesOfStreamlines
+        //The following is the normal case: in the init function we display a random selection of all the streamlines and only select via user input
+        /*displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled()
+            .take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
+            .forEach{ streamline -> tractogram.addChild(streamline)}*/
+
+        tractogramContainer.addChild(tractogram)
+        tractogramContainer.spatial().rotation = quat
+        tractogramContainer.spatial().position = Vector3f(0.0f, -translation.y/2.0f, translation.z) * 0.1f
+        /*logger.info("transformation of tractogram is ${tractogram.spatial().world}, " +
+                "Position is ${tractogram.spatial().worldPosition()}, " +
+                "Scaling is ${tractogram.spatial().worldScale()}, " +
+                "Rotation is ${tractogram.spatial().worldRotation()}")
+        tractogramContainer.addChild(tractogram)
+        tractogram.name = "Whole brain tractogram"*/
 
         val lightbox = Box(Vector3f(75.0f, 75.0f, 75.0f), insideNormals = true)
         lightbox.name = "Lightbox"
@@ -192,9 +251,161 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         scene.addChild(cam)
     }
 
+    /**
+     * Calculates a curve representation for each streamline and determines a geometry that can be rendered.
+     * In the process, metrics like fiber length and curvature of the streamlines are calculated and stored
+     * into metadata.
+     *
+     * @param listVertices List of streamlines (which are lists of vertices / vector3f-points)
+     * @return List of streamline scene-objects that can be rendered
+     * */
+    fun displayableStreamlinesFromVerticesList(listVertices: ArrayList<ArrayList<Vector3f>>) : List<Node> {
+        var timeStamp0 = 0.toLong()
+        var timeStampSplineSize = 0.toLong()
+        var timeStampGeo = 0.toLong()
+        logger.info("Display of ${listVertices.size} streamlines")
+        var maxLen = 0f
+        var maxCurve = 0f
+        var maxAvCurve = 0f
+        val streamlines = List<Node>(listVertices.size){index ->
+            val vecVerticesNotCentered = listVertices[index]
+            val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
+            val catmullRom = UniformBSpline(vecVerticesNotCentered, 2)
+            timeStamp0 = System.nanoTime()
+            val splineSize = catmullRom.splinePoints().size
+            timeStampSplineSize = System.nanoTime()
+            val geo = Curve(catmullRom, partitionAlongControlpoints = false) { triangle(splineSize) }
+            //the following outcommented code can be used for the new CurveSingleShape-Code of curve_restructuring code
+            /*val tri = listOf(
+            Vector3f(0.1f, 0.1f, 0f).times(0.1f),
+            Vector3f(0.1f, -0.1f, 0f).times(0.1f),
+            Vector3f(-0.1f, -0.1f, 0f).times(0.1f),
+            )
+            val geo = CurveSingleShape(catmullRom, partitionAlongControlpoints = false, baseShape = tri)*/
+            timeStampGeo = System.nanoTime()
+            geo.name = "Streamline #$index"
+            var lengthGeo = 0f
+            var sumCurvature = 0f
+
+            //there is only one curveSegment per Streamline if CurveSingleShape is used,
+            // thus local color isn't actually local anymore; Filler until we implement color conventions
+            geo.children.forEachIndexed { i, curveSegment ->
+                val verticesDiff = vecVerticesNotCentered[i+1].minus(vecVerticesNotCentered[i] ?: Vector3f(0.0f))
+                val localColor = (verticesDiff).normalize()
+                curveSegment.materialOrNull()?.diffuse = when(colorMode) {
+                    ColorMode.LocalDirection -> (localColor.plus(Vector3f(0.5f))) / 2.0f
+                    ColorMode.GlobalDirection -> color
+                }
+            }
+
+            val streamlineSize = vecVerticesNotCentered.size
+            var prevLocalLength = 0f
+            var minLocalCurve = 10000f
+            var maxLocalCurve = 0f
+            vecVerticesNotCentered.forEachIndexed{i, vertex ->
+                val localLen : Float
+                if (i<(streamlineSize-1)) localLen = vecVerticesNotCentered[i+1].distance(vecVerticesNotCentered[i]) else localLen = 0f
+                lengthGeo += localLen
+
+                //Outcommented since this can only be used with the curve-restructuring Code, which is currently not available
+                /*val diffTangent: Vector3f
+                if (i<(streamlineSize-1)&&i>0) {
+                    diffTangent = geo.frames[i+1].tangent - geo.frames[i-1].tangent
+                    val derivTangent = diffTangent/(localLen + prevLocalLength)
+                    val localCurvature = derivTangent.dot(geo.frames[i].normal).absoluteValue
+                    sumCurvature += localCurvature
+                    maxLocalCurve = max(maxLocalCurve, localCurvature)
+                    minLocalCurve = min(minLocalCurve, localCurvature)
+                }*/
+                prevLocalLength = localLen
+            }
+            geo.metadata.put("length", lengthGeo)
+            maxLen = max(maxLen, lengthGeo)
+            geo.metadata.put("average curvature", sumCurvature/(streamlineSize-2))
+            geo.metadata.put("maximum curvature", maxLocalCurve)
+            geo.metadata.put("minimum curvature", minLocalCurve)
+            maxAvCurve = max(maxAvCurve, sumCurvature/(streamlineSize-2))
+            maxCurve = max(maxCurve, maxLocalCurve)
+            geo
+        }
+
+        /*val maxCurvatureFilter = 0.05f
+        streamlines.forEachIndexed{i, streamline ->
+            var curve = streamline.metadata.get("maximum curvature")
+            var curveFloat = curve.toString().toFloat()
+            if(curveFloat>maxCurvatureFilter){
+                streamline.visible = false
+            }
+        }*/
+        logger.info("Maximum curvature is $maxCurve, maximum average curve is $maxAvCurve Maximum Fiber length is $maxLen")
+        logger.info("Time for splineSize: ${(timeStampSplineSize-timeStamp0)*listVertices.size/1000000}, " +
+                "Time for creating curve-geometry: ${(timeStampGeo-timeStampSplineSize)*listVertices.size/1000000}")
+        return streamlines
+    }
+
+    /**
+     * Handles the input: If there is a double click on mesh / brain region, a streamline selection is done and
+     * rendered instead of a whole tractogram
+     * */
     override fun inputSetup() {
         super.inputSetup()
         setupCameraModeSwitching()
+
+        /*
+        * Defines the method which gets called as soon as there is a double click.
+        * The closest brainregion to the click event will get selected and thus serves as the streamline selection criteria.
+        * */
+        val displayStreamlines: (Scene.RaycastResult, Int, Int) -> Unit = { raycastResult, i, i2 ->
+            scene.children.filter { it.name == "brain parent" }[0].children
+                .filter { it.name == "tractogram parent" } [0].children
+                .filter { it.name == "Whole brain tractogram" } [0].visible = false
+
+            var selectedArea : HasSpatial? = null
+            for (match in raycastResult.matches) {
+                if(match.node.name.startsWith("grp")){
+                    selectedArea = match.node as HasSpatial
+                    break
+                }
+            }
+
+            val timeStamp0 = System.nanoTime() / 1000000
+
+            var streamlineSelection = StreamlineSelector.streamlineSelectionFromPolytope(selectedArea, selectionVerticesOfStreamlines)
+
+            val timeStampSelection = System.nanoTime() / 1000000
+
+            selectionVerticesOfStreamlines = streamlineSelection
+            if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled()
+                .take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
+            //else scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
+            val tractogramReduced = RichNode()
+            scene.children.filter { it.name == "brain parent" }[0].children
+                .filter { it.name == "tractogram parent" } [0].addChild(tractogramReduced)
+
+            val timeStamp0_2 = System.nanoTime() / 1000000
+
+            /*val displayableStreamlines = displayableStreamlinesFromVerticesList(streamlineSelection)
+
+            val timeStampGeometry = System.nanoTime() / 1000000
+
+            displayableStreamlines.forEach{streamline -> tractogramReduced.addChild(streamline)}
+
+            scene.children.filter { it.name == "brain parent" }[0].children
+                .filter { it.name == "tractogram parent" } [0].removeChild("Reduced tractogram")
+            tractogramReduced.name = "Reduced tractogram"
+            logger.info("Time demand streamline selection: ${timeStampSelection-timeStamp0}, " +
+                    "Time demand calculating geometry of streamlines: ${timeStampGeometry-timeStamp0_2}")*/
+        }
+
+        renderer?.let { r ->
+            inputHandler?.addBehaviour(
+                "selectStreamlines", SelectCommand(
+                    "selectStreamlines", r, scene, {
+                        scene.findObserver()
+                    }, action = displayStreamlines, debugRaycast = false
+                ))
+        }
+        inputHandler?.addKeyBinding("selectStreamlines", "double-click button1")
     }
 
     companion object {
@@ -204,9 +415,9 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         }
 
         val baseList = listOf(
-            Vector3f(0.1f, 0.1f, 0f),
-            Vector3f(0.1f, -0.1f, 0f),
-            Vector3f(-0.1f, -0.1f, 0f),
+            Vector3f(0.1f, 0.1f, 0f).times(0.1f),
+            Vector3f(0.1f, -0.1f, 0f).times(0.1f),
+            Vector3f(-0.1f, -0.1f, 0f).times(0.1f),
         )
 
         fun triangle(splineVerticesCount: Int): List<List<Vector3f>> {
