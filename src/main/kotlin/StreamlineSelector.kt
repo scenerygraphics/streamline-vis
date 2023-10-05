@@ -12,9 +12,6 @@ import net.imglib2.algorithm.kdtree.ClipConvexPolytopeKDTree
 import net.imglib2.algorithm.kdtree.ConvexPolytope
 import net.imglib2.algorithm.kdtree.HyperPlane
 import net.imglib2.mesh.alg.InteriorPointTest
-import net.imglib2.mesh.alg.MeshCursor
-import net.imglib2.position.FunctionRandomAccessible
-import net.imglib2.type.logic.BitType
 import org.joml.Vector2i
 import org.joml.Vector3f
 import java.io.File
@@ -22,9 +19,16 @@ import java.io.IOException
 import java.util.*
 import java.util.function.BiConsumer
 import kotlin.collections.ArrayList
-import kotlin.math.max
-import kotlin.math.min
 
+
+/**
+ * Provides functionality to select streamlines of a given List, by using meshes as the selection criteria.
+ * Only streamlines that start or end within the given mesh are selected. A single Streamline is given by a list
+ * of points.
+ *
+ * It needs to be assured, that both the mesh and streamline points are in the same coordinate system and space,
+ * before using the functions.
+ * */
 class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280, windowHeight = 720)  {
 
     /**
@@ -183,7 +187,8 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
         }
 
         /**
-         * Determines all streamlines that precisely start or end in a given mesh
+         * Determines all streamlines that precisely start or end in a given mesh.
+         * Make sure that the mesh and streamlines are in the same space, before using this method!
          *
          * @param mesh Scenery-Mesh that is used to select streamlines
          * @param streamlines List of all streamlines to be selected from
@@ -194,6 +199,7 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
             var streamlineSelection = streamlines.filterIndexed { index, _ ->
                 insideMask.getOrNull(index) == true
             }
+            //var streamlineSelection = streamlines.take(10) //Dummy-Line to give back a Streamline selection, that can be displayed without time consuming calcuation
             return streamlineSelection
         }
 
@@ -318,6 +324,7 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
                 val index2 = ((index - even) / 2)
                 val streamline = streamlines[index2]
                 val streamlinepoint = if(even==0) streamline.first() else streamline.last()
+                //TODO: Scale mesh before using it in this class - get rid of the *10 here
                 val position = RealPoint(streamlinepoint.x*10, streamlinepoint.y*10, streamlinepoint.z*10)
                 position
             }
