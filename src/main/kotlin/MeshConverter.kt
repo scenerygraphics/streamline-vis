@@ -29,11 +29,11 @@
 
 import graphics.scenery.BufferUtils.Companion.allocateFloat
 //import net.imagej.mesh.Mesh
-import net.imglib2.mesh.obj.Mesh
+import net.imglib2.mesh.Mesh
 //import net.imagej.mesh.Meshes
 import net.imglib2.mesh.Meshes
 //import net.imagej.mesh.nio.BufferMesh
-import net.imglib2.mesh.obj.nio.BufferMesh
+import net.imglib2.mesh.impl.nio.BufferMesh
 import java.nio.FloatBuffer
 
 /**
@@ -50,8 +50,8 @@ object MeshConverter {
      */
     @JvmOverloads @JvmStatic
     fun toScenery(mesh: Mesh, center: Boolean = false, flipWindingOrder: Boolean = false): graphics.scenery.Mesh {
-        val vCount = Int.MAX_VALUE.toLong().coerceAtMost(mesh.vertices().size()).toInt()
-        val tCount = Int.MAX_VALUE.toLong().coerceAtMost(mesh.triangles().size()).toInt()
+        val vCount = Int.MAX_VALUE.toLong().coerceAtMost(mesh.vertices().size().toLong()).toInt()
+        val tCount = Int.MAX_VALUE.toLong().coerceAtMost(mesh.triangles().size().toLong()).toInt()
 
         // Convert the mesh to an NIO-backed one.
         val bufferMesh = BufferMesh(vCount, tCount)

@@ -11,7 +11,8 @@ import net.imglib2.RealPoint
 import net.imglib2.algorithm.kdtree.ClipConvexPolytopeKDTree
 import net.imglib2.algorithm.kdtree.ConvexPolytope
 import net.imglib2.algorithm.kdtree.HyperPlane
-import net.imglib2.mesh.alg.InteriorPointTest
+//import net.imglib2.mesh.alg.InteriorPointTest //deprecated
+import net.imglib2.mesh.alg.Interior
 import org.joml.Vector2i
 import org.joml.Vector3f
 import java.io.File
@@ -97,7 +98,7 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
      * Only works, when mesh is given in the configuration file
      * */
     //TODO: Use this to construct a test case outside of this class
-    /*fun testPointCloud1(mesh : net.imglib2.mesh.obj.Mesh, container : Node) {
+    /*fun testPointCloud1(mesh : net.imglib2.mesh.Mesh, container : Node) {
         val points: MutableList<Vector3f> = ArrayList()
         val realPoints: MutableList<RealPoint> = ArrayList()
         val parentContainer = RichNode()
@@ -117,7 +118,9 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
         }
 
         val timeStamp0 = System.nanoTime()
-        val interiorPointTest = InteriorPointTest(mesh, 1.0)
+        //val interiorPointTest = InteriorPointTest(mesh, 1.0) //deprecated
+        val interiorPointTest = Interior(mesh, 1.0)
+
         /*points.forEach{point ->
             val point_real = RealPoint(point.x, point.y, point.z)
             if (interiorPointTest.isInside(point_real)) {
@@ -300,7 +303,8 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
         //TODO: Do we need to test watertightness?
         fun insidePoints(mesh : Mesh, pointCloud: List<RealPoint>): ArrayList<Boolean>{
             val imgJMesh = MeshConverter.toImageJ(mesh)
-            val interiorPointTest = InteriorPointTest(imgJMesh, 1.0)
+            //val interiorPointTest = InteriorPointTest(imgJMesh, 1.0) //deprecated
+            val interiorPointTest = Interior(imgJMesh, 1.0)
             val insideMask = ArrayList<Boolean>(pointCloud.size/2)
 
             pointCloud.forEachIndexed{index, point ->

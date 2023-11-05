@@ -17,16 +17,31 @@ repositories {
     mavenLocal()
 }
 
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            groupId = "graphics.scenery"
+            artifactId = "streamline-vis"
+            version = "1.0-SNAPSHOT"
+
+            from(components["java"])
+        }
+    }
+}
+
 dependencies {
     api("graphics.scenery:scenery:7a924aba")
+    //branch with new Curve implementation, that offers better curve metrics and will be used in future
+    //implementation("com.github.scenerygraphics:scenery:curve_restructuring-SNAPSHOT")
     api("org.slf4j:slf4j-simple:1.7.36")
     implementation("org.joml:joml:1.10.4")
     implementation("net.imglib2:imglib2:5.13.0")
     //used for the mesh implementation that is currently used for the point-test
-    implementation("net.imglib2:imglib2-mesh:1.0.0-SNAPSHOT")
+    implementation("com.github.imglib:imglib2-mesh:e7d4e89")
     api("graphics.scenery:trx-jvm:47d1732")
-    //branch with new Curve implementation, that offers better curve metrics and will be used in future
-    //implementation("com.github.scenerygraphics:scenery:curve_restructuring-SNAPSHOT")
+    implementation("com.opencsv:opencsv:5.4") //used for reading .csv
+    // https://mvnrepository.com/artifact/net.imglib2/imglib2-ij
+    //implementation("net.imglib2:imglib2-ij:2.0.0-beta-46")
 
     implementation(platform("org.scijava:pom-scijava:32.0.0"))
     implementation("io.scif:scifio")

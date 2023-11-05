@@ -1,4 +1,3 @@
-import com.esotericsoftware.minlog.Log
 import graphics.scenery.*
 import graphics.scenery.attribute.material.Material
 import graphics.scenery.attribute.spatial.HasSpatial
@@ -21,6 +20,7 @@ import org.joml.*
 import java.io.File
 import java.nio.file.Paths
 import java.util.*
+import kotlin.collections.ArrayList
 import kotlin.math.*
 
 
@@ -30,7 +30,7 @@ import kotlin.math.*
  * @author Justin Buerger <burger@mpi-cbg.de>
  * @author Ulrik Guenther <hello@ulrik.is>
  */
-class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, windowHeight = 720) {
+class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no cookies", windowWidth = 1280, windowHeight = 720) {
 
     enum class ColorMode {
         LocalDirection,
@@ -40,7 +40,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
     var colorMode = ColorMode.GlobalDirection
     private var verticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
     var selectionVerticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
-    var maximumStreamlineCount = 1000
+    var _maximumStreamlineCount: Int = maximumStreamlineCount
     /**
      * Sets up the initial scene and reads all relevant parameters from the configuration.
      * The initial scene in particular contains a tractogram, read from a .trx file, a parcellation,
@@ -67,9 +67,9 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         val trx = System.getProperty("trx") //in sciview user input, here test case: rather store in test-folder
         val parcellationPath = System.getProperty("parcellationPath")
         val csvPath = System.getProperty("csvPath")
-        maximumStreamlineCount = System.getProperty("maxStreamlines", "5000").toInt()
+        _maximumStreamlineCount = System.getProperty("maxStreamlines", "5000").toInt()
 
-        logger.info("Loading volume from $volumeDataset and TRX tractogram from $trx, will show $maximumStreamlineCount streamlines max.")
+        logger.info("Loading volume from $volumeDataset and TRX tractogram from $trx, will show $_maximumStreamlineCount streamlines max.")
 
         val container = RichNode()
         container.spatial().rotation = Quaternionf().rotationX(-PI.toFloat()/2.0f)
@@ -77,23 +77,11 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         scene.addChild(container)
 
         // Load nifti volume from file
-        /*val volume = niftiVolumefromFile(volumeDataset)
+        val volume = niftiVolumefromFile(volumeDataset)
         container.addChild(volume)
-        logger.info("transformation of nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")*/
-
-        // Load tractogram from file and add it to the scene
-        val streamlinesAndTransform = tractogramfromFile(trx)
-        verticesOfStreamlines = streamlinesAndTransform.first
-        val rotation = streamlinesAndTransform.second
-        val translation = streamlinesAndTransform.third
-        selectionVerticesOfStreamlines = verticesOfStreamlines
-        val tractogram = RichNode()
-        tractogram.name = "Whole brain tractogram"
-        // Display random selection of all streamlines
-        displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled()
-            .take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
-            .forEach{ streamline -> tractogram.addChild(streamline)}
-
+        logger.info("transformation of volume nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
+        val tractogram = tractogramGameObject(trx)
+        
         val tractogramParent = RichNode()
         //tractogramParent.spatial().rotation = rotation //these transformations seem to not have any effect, but should be relevant since they're read from the .trx file
         //tractogramParent.spatial().position = Vector3f(0.0f, -translation.y/2.0f, translation.z) * 0.1f
@@ -141,13 +129,33 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         scene.addChild(cam)
     }
 
+    private fun tractogramGameObject(trx: String): RichNode {
+        // Load tractogram from file and add it to the scene
+        val streamlinesAndTransform = tractogramFromFile(trx)
+        verticesOfStreamlines = streamlinesAndTransform.streamlines
+        val rotation = streamlinesAndTransform.rotation
+        val translation = streamlinesAndTransform.translation
+        selectionVerticesOfStreamlines = verticesOfStreamlines
+        /*val tractogram = RichNode()
+        tractogram.name = "tractogram"*/
+        // Display random selection of all streamlines
+        /*displayableStreamlinesFromVerticesList(
+            verticesOfStreamlines.shuffled()
+                .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
+        )
+            .forEach { streamline -> tractogram.addChild(streamline) }*/
+        val tractogram = displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
+        return tractogram
+    }
+
+    data class TractogramData(val streamlines: ArrayList<ArrayList<Vector3f>>, val rotation: Quaternionf, val translation: Vector3f)
     /**
      * Reads a .trx file given by a path String and creates a tractogram scene object that contains a random selection of streamlines
      *
      * @param path Path to the .trx file of the tractogram
-     * @return Scene Object of the tractogram
+     * @return Scene Object of the tractogram //TODO: Update
      * */
-    fun tractogramfromFile(path: String): Triple<ArrayList<ArrayList<Vector3f>>, Quaternionf, Vector3f>{
+    fun tractogramFromFile(path: String): TractogramData{
         val scale = Vector3f()
         val translation = Vector3f()
         val quat = Quaternionf()
@@ -179,7 +187,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
             }
             tempStreamlineList.add(vecVerticesNotCentered.map { it.mul(0.1f) } as ArrayList<Vector3f>) //transform tractogram, so the brain areas don't have to be "scaled" for streamline selection;
         }
-        return Triple(tempStreamlineList, quat, translation)
+        return TractogramData(tempStreamlineList, quat, translation) 
     }
 
     /**
@@ -193,6 +201,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         val parcellationContainer = RichNode()
         val labelMap = ParcellationReader().readCsv(csvPath)
         val parcellationReader = ParcellationReader()
+        val brainAreasList = ArrayList<String>()
         parcellationReader.loadParcellationAsLabelRegions(parcellationPath, csvPath).forEachIndexed { _, region ->
             // Generate mesh with imagej-ops
             val m = Meshes.marchingCubes(region);
@@ -200,6 +209,8 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
             // Convert mesh into a scenery mesh for visualization
             val mesh = MeshConverter.toScenery(m, false, flipWindingOrder = true)
             mesh.name = labelMap.get(region.label)?.first ?: "undefined region"
+            mesh.material().diffuse = Random.random3DVectorFromRange(0.2f, 0.8f)
+            brainAreasList.add(mesh.name)
 
             // Scale, since all tractogram related files are scaled to fit into the window
             mesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
@@ -211,6 +222,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
                     destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)
         }
 
+        parcellationContainer.metadata.put("brainAreas", brainAreasList)
         // Read transformation from parcellation Metadata and apply
         //TODO: this doesn't align the parcellation with the other objects, so find out why
         //TODO: Also check translation and scaling
@@ -251,12 +263,14 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         tractogramContainer.addChild(testMesh2)
         val selectedStreamlines2 = StreamlineSelector.preciseStreamlineSelection(testMesh2, selectedStreamlines as java.util.ArrayList<java.util.ArrayList<Vector3f>>)
 
-        val tractogram = RichNode()
+        //val tractogram = RichNode()
         //TODO: handle an empty selectedStreamline list
 
-        displayableStreamlinesFromVerticesList(selectedStreamlines2.shuffled()
-            .take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
-            .forEach{ streamline -> tractogram.addChild(streamline)}
+        /*displayableStreamlinesFromVerticesList(selectedStreamlines2.shuffled()
+            .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
+            .forEach{ streamline -> tractogram.addChild(streamline)}*/
+        val tractogram = displayableStreamlinesFromVerticesList(selectedStreamlines2.shuffled()
+            .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
         testMesh2.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
         testMesh.spatial().scale = Vector3f(0.1f,0.1f,0.1f)
         parcellationMesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
@@ -342,7 +356,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
      * @param listVertices List of streamlines (which are lists of vertices / vector3f-points)
      * @return List of streamline scene-objects that can be rendered
      * */
-    fun displayableStreamlinesFromVerticesList(listVertices: ArrayList<ArrayList<Vector3f>>) : List<Node> {
+    fun displayableStreamlinesFromVerticesList(listVertices: ArrayList<ArrayList<Vector3f>>) : RichNode {
         var timeStamp0 = 0.toLong()
         var timeStampSplineSize = 0.toLong()
         var timeStampGeo = 0.toLong()
@@ -350,6 +364,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         var maxLen = 0f
         var maxCurve = 0f
         var maxAvCurve = 0f
+        val tractogram = RichNode()
         val streamlines = List<Node>(listVertices.size){index ->
             val vecVerticesNotCentered = listVertices[index]
             val color = vecVerticesNotCentered.fold(Vector3f(0.0f)) { lhs, rhs -> (rhs - lhs).normalize() }
@@ -410,6 +425,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
             geo.metadata.put("minimum curvature", minLocalCurve)
             maxAvCurve = max(maxAvCurve, sumCurvature/(streamlineSize-2))
             maxCurve = max(maxCurve, maxLocalCurve)
+            tractogram.addChild(geo)
             geo
         }
 
@@ -424,7 +440,10 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         logger.info("Maximum curvature is $maxCurve, maximum average curve is $maxAvCurve Maximum Fiber length is $maxLen")
         logger.info("Time for splineSize: ${(timeStampSplineSize-timeStamp0)*listVertices.size/1000000}, " +
                 "Time for creating curve-geometry: ${(timeStampGeo-timeStampSplineSize)*listVertices.size/1000000}")
-        return streamlines
+        tractogram.name = "tractogram"
+        tractogram.metadata.put("maxLength", maxLen)
+
+        return tractogram
     }
 
     /**
@@ -442,7 +461,7 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
         val displayStreamlines: (Scene.RaycastResult, Int, Int) -> Unit = { raycastResult, i, i2 ->
             scene.children.filter { it.name == "brain parent" }[0].children
                 .filter { it.name == "tractogram parent" } [0].children
-                .filter { it.name == "Whole brain tractogram" } [0].visible = false
+                .filter { it.name == "tractogram" } [0].visible = false
 
             var selectedArea : HasSpatial? = null
             for (match in raycastResult.matches) {
@@ -460,8 +479,8 @@ class Streamlines: SceneryBase("No arms, no cookies", windowWidth = 1280, window
 
             selectionVerticesOfStreamlines = streamlineSelection
             if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled()
-                .take(maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
-            //else scene.children.filter { it.name == "Whole brain tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
+                .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
+            //else scene.children.filter { it.name == "tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
             val tractogramReduced = RichNode()
             scene.children.filter { it.name == "brain parent" }[0].children
                 .filter { it.name == "tractogram parent" } [0].addChild(tractogramReduced)
