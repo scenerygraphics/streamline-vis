@@ -79,7 +79,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         // Load nifti volume from file
         val volume = niftiVolumefromFile(volumeDataset)
         container.addChild(volume)
-        logger.info("transformation of volume nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
+        //logger.info("transformation of volume nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
         val tractogram = tractogramGameObject(trx)
         
         val tractogramParent = RichNode()
@@ -231,6 +231,8 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         val axisAngle = AxisAngle4f()
         quaternion.get(axisAngle)
         parcellationContainer.spatial().rotation = quaternion
+        parcellationContainer.spatial().position = (pm["translation"] as Vector3f).div(10.0f)
+        parcellationContainer.spatial().scale = (pm["scale"] as Vector3f).div(100f)
         parcellationContainer.name = "Brain areas"
 
         return parcellationContainer
@@ -306,21 +308,23 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
 
 
              val pixeldim = floatArrayOf(0.0f, 0.0f, 0.0f) //should be the correct translation of dimensions to width/height/thickness, but if anything is weird with the scaling, check again
-             pixeldim[0] = m["Voxel width"].toString().toFloat()*100 //What to do with the xyz units parameter? -> xyz_unity provides a code for the unit: in this case mm, but I don't know how to transfer this information to scenery: here scale factor *100 even though we have mm and want to translate to mm
-             pixeldim[1] = m["Voxel height"].toString().toFloat()*100
-             pixeldim[2] = m["Slice thickness"].toString().toFloat()*100
+             pixeldim[0] = m["Voxel width"].toString().toFloat() *100 //What to do with the xyz units parameter? -> xyz_unity provides a code for the unit: in this case mm, but I don't know how to transfer this information to scenery: here scale factor *100 even though we have mm and want to translate to mm
+             pixeldim[1] = m["Voxel height"].toString().toFloat() *100
+             pixeldim[2] = m["Slice thickness"].toString().toFloat() *100
              logger.info("Pixeldim read from nifti is: ${pixeldim[0]}, ${pixeldim[1]}, ${pixeldim[2]}")
 
              val offset = Vector3f(
-                 m["Quaternion x parameter"].toString().toFloat() * 1.0f,
-                 m["Quaternion y parameter"].toString().toFloat() * 1.0f,
-                 m["Quaternion z parameter"].toString().toFloat() * 1.0f,
+                 m["Quaternion x parameter"].toString().toFloat() * 1.0f / 1000,
+                 m["Quaternion y parameter"].toString().toFloat() * -1.0f / 1000,
+                 m["Quaternion z parameter"].toString().toFloat() * 1.0f / 1000,
              )
              logger.info("QOffset read from nifti is: $offset")
 
              //transformations that were given by the read metadata
              volume.spatial().rotation = quaternion
              volume.spatial().scale = Vector3f(pixeldim)
+             logger.info("position previously is: "+ volume.spatial().position)
+             volume.spatial().position = offset
 
          } else if (m["S-form Code"].toString().toFloat()>0) { //method 3 of NIfTI for reading
              for(i in 0..2){

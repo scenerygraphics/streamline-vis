@@ -80,6 +80,7 @@ class ParcellationReader {
         val parcellationMetadataRaw = HashMap<String, Any>()
         parcellation.metadata.table.forEach { key, value ->
             parcellationMetadataRaw[key] = value
+            println(key + " -> " + value)
         }
         parcellationMetadata = transformNiftiMetadata(parcellationMetadataRaw)
 
@@ -142,7 +143,7 @@ class ParcellationReader {
 
             val offset = Vector3f(
                 map["Quaternion x parameter"].toString().toFloat() * 1.0f,
-                map["Quaternion y parameter"].toString().toFloat() * 1.0f,
+                map["Quaternion y parameter"].toString().toFloat() * -1.0f, //negative due to q-form code of 1
                 map["Quaternion z parameter"].toString().toFloat() * 1.0f,
             )
             //logger.info("QOffset read from nifti is: $offset")
@@ -153,6 +154,7 @@ class ParcellationReader {
             tempMap["rotz"] = z
             tempMap["rotw"] = w
             tempMap["scale"] = Vector3f(pixeldim)
+            tempMap["translation"] = offset
 
         } else if (map["S-form Code"].toString().toFloat()>0) { // method 3 of NIfTI for reading
             for(i in 0..2){
