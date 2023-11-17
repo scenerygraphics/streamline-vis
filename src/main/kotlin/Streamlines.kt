@@ -77,7 +77,8 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         scene.addChild(container)
 
         // Load nifti volume from file
-        val volume = niftiVolumefromFile(volumeDataset)
+        //val volume = niftiVolumefromFile(volumeDataset)
+        val volume = NiftiReader.niftiFromFile(volumeDataset, hub)
         container.addChild(volume)
         //logger.info("transformation of volume nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
         val tractogram = tractogramGameObject(trx)
@@ -95,7 +96,8 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
                 "Scaling is ${tractogram.spatial().worldScale()}, " +
                 "Rotation is ${tractogram.spatial().worldRotation()}")*/
 
-        val parcellationObject = parcellationFromFile(parcellationPath, csvPath)
+        //val parcellationObject = parcellationFromFile(parcellationPath, csvPath)
+        val parcellationObject = NiftiReader.niftiFromFile(parcellationPath, hub, csvPath)
         tractogramParent.addChild(parcellationObject)
 
         //TODO: tractogram, volume and parcellation need to align
@@ -197,7 +199,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
      * @param csvPath path to .csv file containing the mapping between label number and region name
      * @return scene object containing meshes for each region
      * */
-    fun parcellationFromFile(parcellationPath: String, csvPath: String): RichNode{
+    /*fun parcellationFromFile(parcellationPath: String, csvPath: String): RichNode{
         val parcellationContainer = RichNode()
         val labelMap = ParcellationReader().readCsv(csvPath)
         val parcellationReader = ParcellationReader()
@@ -236,7 +238,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         parcellationContainer.name = "Brain areas"
 
         return parcellationContainer
-    }
+    }*/
 
     /**
      * Displays streamline selection that connects two specific given brain areas.
@@ -286,7 +288,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
      * @return scenery volume
      * */
     //TODO: .nifti needs to be read in other places too, make method more general and merge with method that reads .nifti parcellation
-    fun niftiVolumefromFile(path: String): Volume{
+    /*fun niftiVolumefromFile(path: String): Volume{
         val volume = Volume.fromPath(Paths.get(path), hub)
         val m = volume.metadata
 
@@ -350,7 +352,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         volume.colormap = Colormap.get("grays")
         volume.transferFunction = TransferFunction.ramp(0.01f, 0.5f)
         return volume
-    }
+    }*/
 
     /**
      * Calculates a curve representation for each streamline and determines a geometry that can be rendered.
