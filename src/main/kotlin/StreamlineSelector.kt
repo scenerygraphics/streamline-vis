@@ -4,6 +4,7 @@ import graphics.scenery.attribute.material.Material
 import graphics.scenery.attribute.spatial.HasSpatial
 import graphics.scenery.backends.Renderer
 import graphics.scenery.numerics.Random
+import graphics.scenery.utils.LazyLogger
 import graphics.scenery.utils.extensions.times
 import net.imglib2.KDTree
 import net.imglib2.Localizable
@@ -13,8 +14,10 @@ import net.imglib2.algorithm.kdtree.ConvexPolytope
 import net.imglib2.algorithm.kdtree.HyperPlane
 //import net.imglib2.mesh.alg.InteriorPointTest //deprecated
 import net.imglib2.mesh.alg.Interior
+import org.joml.Matrix4f
 import org.joml.Vector2i
 import org.joml.Vector3f
+import org.joml.Vector4f
 import java.io.File
 import java.io.IOException
 import java.util.*
@@ -31,7 +34,6 @@ import kotlin.collections.ArrayList
  * before using the functions.
  * */
 class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280, windowHeight = 720)  {
-
     /**
      * Initializing function that is currently used to set up an example for the insideness test (testPointCloud1)
      * */
@@ -197,8 +199,9 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * @param streamlines List of all streamlines to be selected from
          * @return List of streamlines that got selected
          * */
-        fun preciseStreamlineSelection(mesh: Mesh, streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>) : List<java.util.ArrayList<Vector3f>>{
-            val insideMask = insidePoints(mesh, startAndEndPointList(streamlines))
+        //fun preciseStreamlineSelection(mesh: Mesh, meshTransform: Matrix4f, streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>, streamlineTransform: Matrix4f) : List<java.util.ArrayList<Vector3f>>{
+        fun preciseStreamlineSelection(mesh: Mesh, streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>, transform: Matrix4f) : List<java.util.ArrayList<Vector3f>>{
+            val insideMask = insidePoints(mesh, startAndEndPointList(streamlines), transform)
             var streamlineSelection = streamlines.filterIndexed { index, _ ->
                 insideMask.getOrNull(index) == true
             }
@@ -213,8 +216,8 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * @param streamlines All streamlines from which should be selected
          * @return List of selected Streamlines (List of List of Points in a single streamline) that start or finish in the given polytope
          * */
-        fun streamlineSelectionFromPolytope(selectedArea: HasSpatial?, streamlines: java.util.ArrayList<java.util.ArrayList<Vector3f>>): java.util.ArrayList<java.util.ArrayList<Vector3f>> {
-            //TODO: Get rid of the Hyperplane-calculation as soon as there is a more precise way of determining the selected area / streamlines to be selected
+        //fun streamlineSelectionFromPolytope(selectedArea: HasSpatial?, transformSelectedArea: Matrix4f, streamlines: java.util.ArrayList<java.util.ArrayList<Vector3f>>, tranformStreamlines: Matrix4f): java.util.ArrayList<java.util.ArrayList<Vector3f>> {
+        fun streamlineSelectionFromPolytope(selectedArea: HasSpatial?, streamlines: java.util.ArrayList<java.util.ArrayList<Vector3f>>): java.util.ArrayList<java.util.ArrayList<Vector3f>> { //TODO: transformations need to be applied to polytope before using in this function
             /*
             * Calculation of the Hyperplanes that form the bounding box.
             * The Hyperplanes form the polytope which is input to the following algorithm.
@@ -301,8 +304,18 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * @return list of indices of selected points
          * */
         //TODO: Do we need to test watertightness?
-        fun insidePoints(mesh : Mesh, pointCloud: List<RealPoint>): ArrayList<Boolean>{
+        fun insidePoints(mesh : Mesh, pointCloud: List<RealPoint>, transform: Matrix4f): ArrayList<Boolean>{
             val imgJMesh = MeshConverter.toImageJ(mesh)
+
+            // transform mesh vertices according to given transformation matrix
+            /*imgJMesh.vertices().forEach{vertex ->
+                val vertexPos = vertex.index()
+                val currentVertex = Vector4f(vertex.xf(), vertex.yf(), vertex.zf(), 1f)
+                transform.transform(currentVertex)
+                imgJMesh.vertices().setPositionf(vertexPos, currentVertex.x, currentVertex.y, currentVertex.z)
+            }*/
+
+            //TODO: apply Transformation to Mesh
             //val interiorPointTest = InteriorPointTest(imgJMesh, 1.0) //deprecated
             val interiorPointTest = Interior(imgJMesh, 1.0)
             val insideMask = ArrayList<Boolean>(pointCloud.size/2)

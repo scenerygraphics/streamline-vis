@@ -15,7 +15,6 @@ import graphics.scenery.utils.extensions.times
 import graphics.scenery.volumes.Colormap
 import graphics.scenery.volumes.TransferFunction
 import graphics.scenery.volumes.Volume
-import net.imglib2.mesh.Meshes
 import org.joml.*
 import java.io.File
 import java.nio.file.Paths
@@ -48,18 +47,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
      * read from a .nifti file, which shows the whole brain.
      * */
     override fun init() {
-        val propertiesFile = File(this::class.java.simpleName + ".properties")
-        if(propertiesFile.exists()) {
-            val p = Properties()
-            p.load(propertiesFile.inputStream())
-            logger.info("Loaded properties from $propertiesFile:")
-            p.forEach { k, v ->
-                logger.info(" * $k=$v")
-                System.setProperty(k as String, v as String)
-            }
-        }
-
-        renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
+        defaultScene()
 
         // Example input to test code
         //TODO: Test folder with this data and test class
@@ -76,34 +64,135 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         container.name = "brain parent"
         scene.addChild(container)
 
-        // Load nifti volume from file
-        //val volume = niftiVolumefromFile(volumeDataset)
-        val volume = NiftiReader.niftiFromFile(volumeDataset, hub)
-        container.addChild(volume)
-        //logger.info("transformation of volume nifti is ${volume.spatial().world}, Position is ${volume.spatial().worldPosition()}")
+        //load tractogram from file
         val tractogram = tractogramGameObject(trx)
-        
         val tractogramParent = RichNode()
-        //tractogramParent.spatial().rotation = rotation //these transformations seem to not have any effect, but should be relevant since they're read from the .trx file
-        //tractogramParent.spatial().position = Vector3f(0.0f, -translation.y/2.0f, translation.z) * 0.1f
         tractogramParent.addChild(tractogram)
-
         tractogramParent.name = "tractogram parent"
         container.addChild(tractogramParent)
 
-        /*logger.info("transformation of tractogram is ${tractogram.spatial().world}, " +
-                "Position is ${tractogram.spatial().worldPosition()}, " +
-                "Scaling is ${tractogram.spatial().worldScale()}, " +
-                "Rotation is ${tractogram.spatial().worldRotation()}")*/
-
-        //val parcellationObject = parcellationFromFile(parcellationPath, csvPath)
+        //load parcellation from file
         val parcellationObject = NiftiReader.niftiFromFile(parcellationPath, hub, csvPath)
-        tractogramParent.addChild(parcellationObject)
+        tractogramParent.addChild(parcellationObject) // outcommented to try the selection with two specific parcellation meshes: only those are supposed to show
+        scene.spatial().updateWorld(true)
 
+        // Load nifti volume from file
+        val volume = NiftiReader.niftiFromFile(volumeDataset, hub)
+        applyInvTractogramTransform(tractogram, volume)
+        container.addChild(volume)
+
+        //Test functions
+        //testStreamlineSelectionWithNewParcellationTransform(parcellationObject, tractogramParent) //current test function to try apply tranformation directly to the mesh in order to do a correct streamline selection
+        //testStreamlineSelection(tractogramParent)
+        //testStreamlineSelectionRealParcellation(tractogramParent, parcellationObject)
+        //TODO: look through all "test" cases to check if all of them are needed and how to better write them
         //TODO: tractogram, volume and parcellation need to align
 
-        // Test the selection: selects two specific brain regions for which a streamline selection is calculated
-        //testStreamlineSelection(tractogramParent)
+        // Try using a .tiff instead of the nifti to load the volume to try, if transformations might be correct, but the nifti format could be faulty
+        //tryTiffVolume(container) //currently doesn't work: .tiff doesn't get shown, thus I don't know if it has the right transform
+    }
+
+    /**
+     * Applies transformation that is stored in metadata of the tractogram. Since it doesn't work to apply the
+     * transformation directly to the tractogram itself, the inverse transformation is applied to the volume instead.
+     *
+     * @param tractoram Scene object of the tractogram that contains the relevant metadata
+     * @param volume Scene object of the volume that should be transformed instead of the tractogram
+     * */
+    private fun applyInvTractogramTransform(tractogram: RichNode, volume: Node) {
+        val maxAcceptedDifference = 0.015f
+        val transformTractogram = tractogram.metadata.get("voxelToRasMatrix") as Matrix4f
+        val transformCopy = Matrix4f()
+        transformCopy.set(transformTractogram)
+        transformTractogram.invert()
+        if (transformCopy.mul(transformTractogram).equals(Matrix4f().identity(), maxAcceptedDifference)) {
+            logger.info("Inversion matrix and original matrix are inverse to each other with an acceptable error.")
+        } else {
+            logger.warn(
+                "The inversion matrix and the original matrix are not inverse to each other with an acceptable error of max $maxAcceptedDifference per cell. " +
+                        "The original transformation matrix needs to be applied to the tractogram instead of taking this route."
+            )
+        }
+        // Prior to trying this, the transformation was applied to the tractogram directly, but this didn't work
+        // TODO: Apply transformation directly to the tractogram (especially if warning gets displayed)
+
+        /*
+        Decomposing the matrix to get components that can directly be applied to the volume scene object.
+        The following code can be deleted once there is a way to apply the transformation matrix as a whole to the volume.
+        * */
+        val invertedRotation = Quaternionf(0f, 0f, 0f, 0f)
+        val invertedScaling = Vector3f(1f, 1f, 1f)
+        val invertedTranslation = Vector3f(0f, 0f, 0f)
+        transformTractogram.getScale(invertedScaling)
+        transformTractogram.getUnnormalizedRotation(invertedRotation)
+        transformTractogram.getTranslation(invertedTranslation)
+
+        /*
+        * Use the single components in order to compose a new matrix, that can be checked against the original matrix.
+        * If their difference is greater than an acceptable error, the decomposition did not sufficiently work
+        * (probably due to shearing which is not supported by the decomposition)
+        * */
+        val invScalingMatrix = Matrix4f().scale(invertedScaling)
+        val invRotationMatrix = Matrix4f().rotate(invertedRotation)
+        val invTranslationMatrix = Matrix4f().translate(invertedTranslation)
+        val composedMatrix = invScalingMatrix.mul(invRotationMatrix).mul(invTranslationMatrix)
+        logger.info(
+            "composed matrix is $composedMatrix. Inverted transformation of tractogram is $transformTractogram." +
+                    " Asserting that both are equal with maximal difference of $maxAcceptedDifference."
+        )
+        if (composedMatrix.equals(transformTractogram, maxAcceptedDifference)) {
+            logger.info("Transformation components can be used one by one. Shearing can be neglected.")
+        } else {
+            logger.warn(
+                "The shearing components aren't small enough to be neglected. " +
+                        "Transformation needs to be applied by using the transformation matrix as a whole."
+            )
+        }
+
+        /*
+        * The transformation of the volume is composed of what was read from the volume metadata and is already applied
+        * to the object (by functionality of class "NiftiReader", where the transformation is already applied using
+        * specific factors) and the inverse transformation of the tractogram,
+        * which additionally gets applied within this function.
+        */
+        // TODO: Combine information from both sources with sensible scaling factors (10, 100, 1000 maybe) (volume transformation and inverse tractogram transformation) in order to align tractogram (+parcellation) with the volume
+
+        /*
+        * The following factors can be used to explore which might be a combination of present information that leads
+        * to an alignment of the tractogram (+parcellation) and the volume.
+        * */
+        val factorVolumeScale = 1f
+        val factorTractogramScale = 1f
+        val factorVolumeTranslation = 1f
+        val factorTractogramTranslation = 0.1f
+
+        volume.spatialOrNull()?.scale = volume.spatialOrNull()?.scale?.mul(factorVolumeScale)?.mul(invertedScaling.mul(factorTractogramScale)) ?: Vector3f(1f,1f,1f)
+        volume.spatialOrNull()?.rotation = volume.spatialOrNull()?.rotation?.mul(invertedRotation) ?: Quaternionf(0f,0f,0f, 0f)
+        volume.spatialOrNull()?.position = volume.spatialOrNull()?.position?.mul(factorVolumeTranslation)?.add(invertedTranslation.mul(factorTractogramTranslation)) ?: Vector3f(0f,0f,0f)
+
+        // TODO: Apply Transformation directly as a matrix to the volume
+        /*
+        * Trials to apply the transformation matrix directly to the volume matrix, however this does not update
+        * the actual transform yet, since this is rather defined by the sinlge components scaling, rotation and translation (position)
+        * */
+        /*scene.spatial().updateWorld(true)
+        volume.spatialOrNull()?.world = volume.spatialOrNull()?.world?.mul(transformTractogram)  ?: Matrix4f().identity()
+        volume.spatialOrNull()?.wantsComposeModel = true*/
+    }
+
+    private fun defaultScene() {
+        val propertiesFile = File(this::class.java.simpleName + ".properties")
+        if (propertiesFile.exists()) {
+            val p = Properties()
+            p.load(propertiesFile.inputStream())
+            logger.info("Loaded properties from $propertiesFile:")
+            p.forEach { k, v ->
+                logger.info(" * $k=$v")
+                System.setProperty(k as String, v as String)
+            }
+        }
+
+        renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
 
         val lightbox = Box(Vector3f(75.0f, 75.0f, 75.0f), insideNormals = true)
         lightbox.name = "Lightbox"
@@ -131,12 +220,109 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         scene.addChild(cam)
     }
 
+    /**
+     * Function is used to test, if transforming the parcellation mesh directly via its vertices leads to a correct
+     * overlay of parcellation and tractogram, so that a streamline selection can be done.
+     *
+     * Idea: Transform vertices of the parcellation mesh by world transform and then transform
+     * */
+    private fun testStreamlineSelectionWithNewParcellationTransform(parcellationObject: Node, tractogramParent: RichNode) { //TODO: Null-Management if we get empty streamline list: print warning message and then just don't display streamlines
+        parcellationObject.spatialOrNull()?.scale =
+            parcellationObject.spatialOrNull()?.scale?.mul(0.1f) ?: Vector3f(1f, 1f, 1f)
+        parcellationObject.spatialOrNull()?.updateWorld(true)
+        //TODO: Find better way than to upscale and downscale once againg -> Scaling should be applied to the tractogram directly, so that this transformation isn't nessecary
+        parcellationObject.children.forEach { child ->
+            child.visible = false
+        }
+        val testMesh = parcellationObject.children[42] as Mesh
+        val testTransform = parcellationObject.children[42].spatialOrNull()?.world ?: run {
+            logger.warn("World transform of test mesh is null. Applying identity matrix to the vertices instead.")
+            Matrix4f().identity()
+        }
+        val testMeshSpecificTransform = parcellationObject.parent?.spatialOrNull()?.world ?: run {
+            logger.warn("World transform of test mesh parent is null. Providing identity matrix to the streamline selection algorithm instead.")
+            Matrix4f().identity()
+        }
+        val verticesBuffer = testMesh.geometry().vertices
+        verticesBuffer.rewind()
+        while(verticesBuffer.remaining() >= 3){
+            //multiply each vertex with world transform
+            val currentPos = verticesBuffer.position()
+            val currentVertex = Vector4f(verticesBuffer.get(), verticesBuffer.get(), verticesBuffer.get(), 1f)
+            val transformedVertex = testTransform.transform(currentVertex) //TODO: check if this is the correct order to multiply the two
+            //TODO: doesn't acutally need a new variable, since transformation is directly done on the old object
+            verticesBuffer.put(currentPos, transformedVertex?.x ?: currentVertex.x)
+            verticesBuffer.put(currentPos+1, transformedVertex?.y ?: currentVertex.y)
+            verticesBuffer.put(currentPos+2, transformedVertex?.y ?: currentVertex.z)
+            verticesBuffer.position(currentPos+3)
+        }
+        verticesBuffer.rewind()
+        //TODO: use inverted matrix to change transform of the mesh
+        //TODO: perhaps only use non-visible object / representation of the mesh object to make calculation that isn't displayed in any way
+        val invertedTransform = testTransform?.invertAffine(testTransform) //TODO: should be affine transformation -> check testTransform if it hast the correct last column, then use invertAffine()
+        //TODO: doesn't acutally have to reassign matrix to invertedTransform, since the inversion already happens directly on the testTransform
+        scene.spatial().updateWorld(true)
+        val worldTransform = testMesh.spatial().world
+        testMesh.visible = true
+        //parcellationObject.children[42].visible = true
+        //val selectedStreamlines = StreamlineSelector.streamlineSelectionFromPolytope(testMesh, verticesOfStreamlines)
+        val selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(testMesh, verticesOfStreamlines, testMeshSpecificTransform) //use this instead of the testTransform in order to only apply those transformations onto the mesh that differ between tractogram and parcellation
+        try {
+            val selectedTractogram = displayableStreamlinesFromVerticesList(
+                selectedStreamlines.shuffled()
+                    .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>> //TODO: ArrayList cast can't be used with empty arraylist can only be done, if we do have streamlines
+            )
+            tractogramParent.addChild(selectedTractogram)
+        }catch (e: Exception){
+            //TODO: use when-Block to differentiate between different exceptions -> ClassCastException is the first one occuring, if there is an empty list of vertices that get selected
+            logger.warn("Empty list of streamlines. No streamline selection will be displayed.")
+        }
+        //parcellationObject.children[44].visible = true
+        parcellationObject.spatialOrNull()?.scale =
+            parcellationObject.spatialOrNull()?.scale?.mul(10f) ?: Vector3f(1f, 1f, 1f)
+        parcellationObject.spatialOrNull()?.updateWorld(true)
+    }
+
+    private fun tryTiffVolume(container: RichNode) {
+        //try to add volume as a .tif that was previously created via Fiji
+        val volumeTiffPath = System.getProperty("datasets") + "\\scenery_tractography_vis_cortex1_ushort.nii.tif"
+
+        val volumeTiff = Volume.fromPath(Paths.get(volumeTiffPath), hub)
+        volumeTiff.colormap = Colormap.get("grays")
+        //volumeTiff.transferFunction = TransferFunction.ramp(0.01f, 5200f) //0.5f before
+        /*val tf = TransferFunction("FlatAfter")
+        tf.addControlPoint(0.0f, 0f)
+        tf.addControlPoint(0.01f, 0f)
+        tf.addControlPoint(0.011f, 0.5f)
+        tf.addControlPoint(1.0f, 0.5f)*/
+        val tf = TransferFunction()
+        tf.addControlPoint(0.0f, 0.0f) // for pixel value 0, alpha is 0 (completely transparent)
+        tf.addControlPoint(0.01f/65535.0f, 0.0f) // for pixel value 100, alpha is 0 (completely transparent)
+        tf.addControlPoint(1f / 65535.0f, 1.0f)
+        tf.addControlPoint(1017.0f / 65535.0f, 1.0f) // for pixel value 1017, alpha is 1 (completely opaque)
+        tf.addControlPoint(5001.0f / 65535.0f, 1.0f) // for pixel value 5001, alpha is 1 (completely opaque)
+        tf.addControlPoint(3017.0f / 65535.0f, 1.0f)
+        volumeTiff.transferFunction = tf
+
+        volumeTiff.spatial().scale = Vector3f(
+            0.43169886f * 100f,
+            0.4339234f * 100f,
+            0.6199905f * 100
+        ) //normally volume is loaded with *100 scaling, tractogram would be loaded without any factor applied to the scaling
+        volumeTiff.spatial().position =
+            Vector3f(107.386f, -63.4674f, 119.598f).div(1000f) //for tractogram only divide by 10
+        val x = -0.0049300706f
+        val y = -0.9989844f
+        val z = 0.04474579f
+        val w = sqrt(1.0 - (x * x + y * y + z * z)).toFloat()
+        volumeTiff.spatial().rotation = Quaternionf(x, y, z, w)
+        container.addChild(volumeTiff)
+    }
+
     private fun tractogramGameObject(trx: String): RichNode {
         // Load tractogram from file and add it to the scene
         val streamlinesAndTransform = tractogramFromFile(trx)
         verticesOfStreamlines = streamlinesAndTransform.streamlines
-        val rotation = streamlinesAndTransform.rotation
-        val translation = streamlinesAndTransform.translation
         selectionVerticesOfStreamlines = verticesOfStreamlines
         /*val tractogram = RichNode()
         tractogram.name = "tractogram"*/
@@ -147,10 +333,11 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         )
             .forEach { streamline -> tractogram.addChild(streamline) }*/
         val tractogram = displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
+        tractogram.metadata.put("voxelToRasMatrix", streamlinesAndTransform.voxelToRasMatrix)
         return tractogram
     }
 
-    data class TractogramData(val streamlines: ArrayList<ArrayList<Vector3f>>, val rotation: Quaternionf, val translation: Vector3f)
+    data class TractogramData(val streamlines: ArrayList<ArrayList<Vector3f>>, val voxelToRasMatrix: Matrix4f)
     /**
      * Reads a .trx file given by a path String and creates a tractogram scene object that contains a random selection of streamlines
      *
@@ -158,23 +345,11 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
      * @return Scene Object of the tractogram //TODO: Update
      * */
     fun tractogramFromFile(path: String): TractogramData{
-        val scale = Vector3f()
-        val translation = Vector3f()
-        val quat = Quaternionf()
-
         val trx = TRXReader.readTRX(path)
-        val tr = Matrix4f(trx.header.voxelToRasMM)
-        tr.transpose()
+        val transform = Matrix4f(trx.header.voxelToRasMM)
+        transform.transpose()
 
-        /*
-        * Read transformations from .trx file and store them to be used to transform the game object
-        * */
-        tr.getScale(scale)
-        tr.getTranslation(translation)
-        tr.getNormalizedRotation(quat)
-
-        logger.info("Transform of tractogram is: ${tr.transpose()}. Scaling is $scale. Translation is $translation. " +
-                "Normalized rotation quaternion is $quat.")
+        logger.info("Transform of tractogram is: ${transform}.")
 
         val tempStreamlineList = ArrayList<ArrayList<Vector3f>>()
         trx.streamlines.forEachIndexed { index, line ->
@@ -189,7 +364,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
             }
             tempStreamlineList.add(vecVerticesNotCentered.map { it.mul(0.1f) } as ArrayList<Vector3f>) //transform tractogram, so the brain areas don't have to be "scaled" for streamline selection;
         }
-        return TractogramData(tempStreamlineList, quat, translation) 
+        return TractogramData(tempStreamlineList, transform)
     }
 
     /**
@@ -243,7 +418,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
     /**
      * Displays streamline selection that connects two specific given brain areas.
      * */
-    fun testStreamlineSelection(tractogramContainer: RichNode){
+    /*fun testStreamlineSelection(tractogramContainer: RichNode){
         /*
         * Read in parcellation meshes from the system. Set a name for the brain regions which can be used in the user
         * interaction to check, whether selected objects are brain regions. Set the brain regions to be transparent.
@@ -261,11 +436,11 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         //Test case: only display the streamlines that start or end within the test mesh
         val testMesh = parcellationMesh.children[44] as Mesh
         tractogramContainer.addChild(testMesh)
-        val selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(testMesh, verticesOfStreamlines)
+        val selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(testMesh, verticesOfStreamlines) //TODO: function needs transformation as a parameter
 
         val testMesh2 = parcellationMesh.children[42] as Mesh
         tractogramContainer.addChild(testMesh2)
-        val selectedStreamlines2 = StreamlineSelector.preciseStreamlineSelection(testMesh2, selectedStreamlines as java.util.ArrayList<java.util.ArrayList<Vector3f>>)
+        val selectedStreamlines2 = StreamlineSelector.preciseStreamlineSelection(testMesh2, selectedStreamlines as java.util.ArrayList<java.util.ArrayList<Vector3f>>) // TODO: function needs transformation matrix as parameter
 
         //val tractogram = RichNode()
         //TODO: handle an empty selectedStreamline list
@@ -273,12 +448,45 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         /*displayableStreamlinesFromVerticesList(selectedStreamlines2.shuffled()
             .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
             .forEach{ streamline -> tractogram.addChild(streamline)}*/
-        val tractogram = displayableStreamlinesFromVerticesList(selectedStreamlines2.shuffled()
+        val tractogram = displayableStreamlinesFromVerticesList(selectedStreamlines2.shuffled() //TODO: function needs transformation matrix as parameter
             .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
         testMesh2.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
         testMesh.spatial().scale = Vector3f(0.1f,0.1f,0.1f)
         parcellationMesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
         tractogramContainer.addChild(tractogram)
+    }*/
+
+    /**
+     * Displays streamline selection that connects two specific given brain areas.
+     * */
+    fun testStreamlineSelectionRealParcellation(tractogramContainer: RichNode, parcellation: Node){
+        parcellation.children.forEach {child ->
+            child.materialOrNull()?.blending =
+                Blending(transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
+                    destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)
+        }
+
+        //Test case: only display the streamlines that start or end within the test mesh
+        val testMesh = parcellation.children[44] as Mesh
+        tractogramContainer.addChild(testMesh)
+        //val selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(testMesh, verticesOfStreamlines)
+
+        val testMesh2 = parcellation.children[42] as Mesh
+        tractogramContainer.addChild(testMesh2)
+        //val selectedStreamlines2 = StreamlineSelector.preciseStreamlineSelection(testMesh2, selectedStreamlines as java.util.ArrayList<java.util.ArrayList<Vector3f>>)
+
+        //val tractogram = RichNode()
+        //TODO: handle an empty selectedStreamline list
+
+        /*displayableStreamlinesFromVerticesList(selectedStreamlines2.shuffled()
+            .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
+            .forEach{ streamline -> tractogram.addChild(streamline)}*/
+        //val tractogram = displayableStreamlinesFromVerticesList(selectedStreamlines2.shuffled()
+        //    .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
+        //testMesh2.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
+        //testMesh.spatial().scale = Vector3f(0.1f,0.1f,0.1f)
+        //parcellation.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
+        //tractogramContainer.addChild(tractogram)
     }
 
     /**
