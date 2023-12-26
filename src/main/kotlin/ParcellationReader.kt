@@ -1,6 +1,7 @@
 import com.esotericsoftware.minlog.Log
 import com.opencsv.CSVReader
 import graphics.scenery.SceneryBase
+import graphics.scenery.utils.LazyLogger
 import graphics.scenery.utils.extensions.times
 import io.scif.img.ImgOpener
 import net.imglib2.img.Img
@@ -15,6 +16,7 @@ import kotlin.math.sqrt
 class ParcellationReader {
     val idList : MutableList<Int> = mutableListOf()
     var parcellationMetadata = HashMap<String, Any>()
+    private val logger by LazyLogger()
 
     /**
      * Reads .csv file that contains a mapping between label numbers and their names and colors.
@@ -122,6 +124,7 @@ class ParcellationReader {
      * @return map of metadata that is more easily interpretable
      * */
     //TODO: Reading .niftis should be a function outside of this class, since it's both needed in here, but also for reading volume .niftis in other classes
+    //TODO: get rid of this function: implemented in NiftiReader
     fun transformNiftiMetadata(map: HashMap<String, Any>): HashMap<String, Any>{
         val transform = Matrix4f()
         val tempMap = HashMap<String, Any>()

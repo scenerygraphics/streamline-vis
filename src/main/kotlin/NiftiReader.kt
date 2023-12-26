@@ -28,7 +28,7 @@ class NiftiReader { //TODO: make dataclass
             val metadata = transformNiftiMetadata(rawMetadata)
             var node: Node
             if(type == IntType().javaClass){
-                node = parcellationFromFile(nifti.img, csvPath)
+                node = parcellationFromFile(nifti.img, csvPath) //TODO: perhaps rather do this within the parcellationReader, since this really isn't specific to niftis
             }else if(type == UnsignedShortType().javaClass){
                 node = volumeFromFile(niftiPath, hub)
                 //TODO: talk about idea, that we first try to load nifti as volume and if this throws exception, we load it in a different style -> like a parcellation??
@@ -183,6 +183,7 @@ class NiftiReader { //TODO: make dataclass
 
             if(isVolume(node)){
                 node as Volume
+                //node.spatialOrNull()?.position = (metadata["translation"] as Vector3f).div(1000f)
                 node.spatialOrNull()?.position = (metadata["translation"] as Vector3f).div(1000f)
                 node.spatialOrNull()?.scale = (metadata["scale"] as Vector3f)
                 node.name = "Volume" //TODO: is this the correct name?
@@ -190,7 +191,7 @@ class NiftiReader { //TODO: make dataclass
                 node.transferFunction = TransferFunction.ramp(0.01f, 0.5f)
             }else{
                 node.spatialOrNull()?.position = (metadata["translation"] as Vector3f).div(10.0f)
-                node.spatialOrNull()?.scale = (metadata["scale"] as Vector3f).div(100f)
+                node.spatialOrNull()?.scale = (metadata["scale"] as Vector3f).div(100f) //TODO: further up, it is multiplied by 100 -> we can get rid of both
                 node.name = "Brain areas"
             }
 
