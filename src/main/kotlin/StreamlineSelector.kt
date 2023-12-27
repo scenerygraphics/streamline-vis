@@ -201,8 +201,8 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * @return List of streamlines that got selected
          * */
         //fun preciseStreamlineSelection(mesh: Mesh, meshTransform: Matrix4f, streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>, streamlineTransform: Matrix4f) : List<java.util.ArrayList<Vector3f>>{
-        fun preciseStreamlineSelection(mesh: Mesh, streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>, transform: Matrix4f) : List<java.util.ArrayList<Vector3f>>{
-            val insideMask = insidePoints(mesh, startAndEndPointList(streamlines), transform)
+        fun preciseStreamlineSelection(mesh: Mesh, streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>) : List<java.util.ArrayList<Vector3f>>{
+            val insideMask = insidePoints(mesh, startAndEndPointList(streamlines))
             var streamlineSelection = streamlines.filterIndexed { index, _ ->
                 insideMask.getOrNull(index) == true
             }
@@ -305,7 +305,7 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * @return list of indices of selected points
          * */
         //TODO: Do we need to test watertightness?
-        fun insidePoints(mesh : Mesh, pointCloud: List<RealPoint>, transform: Matrix4f): ArrayList<Boolean>{
+        fun insidePoints(mesh : Mesh, pointCloud: List<RealPoint>): ArrayList<Boolean>{
             val imgJMesh = MeshConverter.toImageJ(mesh)
 
             // transform mesh vertices according to given transformation matrix
