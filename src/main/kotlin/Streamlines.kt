@@ -82,7 +82,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         container.addChild(volume)
 
         //Test functions
-        //testStreamlineSelectionWithNewParcellationTransform(parcellationObject, tractogramParent) //current test function to try apply tranformation directly to the mesh in order to do a correct streamline selection
+        streamlineSelectionTransformedMesh(parcellationObject, tractogramParent) //current test function to try apply tranformation directly to the mesh in order to do a correct streamline selection
         //testStreamlineSelection(tractogramParent)
         //testStreamlineSelectionRealParcellation(tractogramParent, parcellationObject)
         //TODO: look through all "test" cases to check if all of them are needed and how to better write them
@@ -96,7 +96,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
      * Applies transformation that is stored in metadata of the tractogram. Since it doesn't work to apply the
      * transformation directly to the tractogram itself, the inverse transformation is applied to the volume instead.
      *
-     * @param tractoram Scene object of the tractogram that contains the relevant metadata
+     * @param tractogram Scene object of the tractogram that contains the relevant metadata
      * @param volume Scene object of the volume that should be transformed instead of the tractogram
      * */
     private fun applyInvTractogramTransform(tractogram: RichNode, volume: Node) {
@@ -225,62 +225,128 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
      * overlay of parcellation and tractogram, so that a streamline selection can be done.
      *
      * Idea: Transform vertices of the parcellation mesh by world transform and then transform
+     * @param tractogramParent Scene object of the tractogram parent, which contains the tractogram
+     * @param parcellationObject Scene object of the parcellation, which contains the meshes of the brain regions
      * */
-    private fun testStreamlineSelectionWithNewParcellationTransform(parcellationObject: Node, tractogramParent: RichNode) { //TODO: Null-Management if we get empty streamline list: print warning message and then just don't display streamlines
-        parcellationObject.spatialOrNull()?.scale =
-            parcellationObject.spatialOrNull()?.scale?.mul(0.1f) ?: Vector3f(1f, 1f, 1f)
+    private fun streamlineSelectionTransformedMesh(parcellationObject: Node, tractogramParent: RichNode) { //TODO: Null-Management if we get empty streamline list: print warning message and then just don't display streamlines
         parcellationObject.spatialOrNull()?.updateWorld(true)
-        //TODO: Find better way than to upscale and downscale once againg -> Scaling should be applied to the tractogram directly, so that this transformation isn't nessecary
         parcellationObject.children.forEach { child ->
             child.visible = false
         }
+
+        //TODO: Use the following to check if modelTransform contains exactly rotation, translation, scaling, nothing more
+        /*logger.info("Local translation of parcellation is $localTranslationParcellation.")
+
+        val localRotationParcellation = parcellationObject.spatialOrNull()?.rotation ?: run {
+            logger.warn("Local rotation of parcellation is null. Applying identity matrix to the vertices instead.")
+            Quaternionf(0f, 0f, 0f, 0f)
+        }
+        logger.info("Local rotation of parcellation is $localRotationParcellation.")
+        val localScaleParcellation = parcellationObject.spatialOrNull()?.scale ?: run {
+            logger.warn("Local scale of parcellation is null. Applying identity matrix to the vertices instead.")
+            Vector3f(1f, 1f, 1f)
+        }
+        logger.info("Local scale of parcellation is $localScaleParcellation.")
+        val localTransformParcellation = parcellationObject.spatialOrNull()?.model
+        logger.info("Local transform of parcellation is $localTransformParcellation.")
+
+        val translationMatrix = Matrix4f().translate(localTranslationParcellation)
+        val rotationMatrix = Matrix4f().rotate(localRotationParcellation)
+        val scaleMatrix = Matrix4f().scale(localScaleParcellation)
+        val calculatedModelParcellation = translationMatrix.mul(rotationMatrix).mul(scaleMatrix)
+        logger.info("Calculated local transform of parcellation is $calculatedModelParcellation.")*/
+
+        //TODO: Use the following to test, if streamlines really aren't transformed in any way
+        /*tractogramParent.children.get(0).children.forEach { streamline ->
+            val spatial = streamline.spatialOrNull()
+            val testMeshLocalTransform = spatial?.model
+            val testMeshTranslation = spatial?.position
+            val testMeshRotation = spatial?.rotation
+            val testMeshScale = spatial?.scale
+            if(testMeshLocalTransform!=Matrix4f().identity()||testMeshTranslation!=Vector3f(0f,0f,0f)||testMeshRotation!=Quaternionf(0f,0f,0f,1f)||testMeshScale!=Vector3f(1f,1f,1f)){
+                logger.info("Local transform of streamline ${streamline.name} is $testMeshLocalTransform.")
+                logger.info("Local translation of streamline ${streamline.name} is $testMeshTranslation.")
+                logger.info("Local rotation of streamline ${streamline.name} is $testMeshRotation.")
+                logger.info("Local scale of streamline ${streamline.name} is $testMeshScale.")
+            }
+        }*/
+
+        logger.info("tractogram is transformed by local matrix: ${tractogramParent.children.get(0).spatialOrNull()?.model}.")
+
+        /* //TODO: Use this to check if correct
+        val calculatedWorldTransformParcellation = testMeshSpecificTransform.mul(localTransformParcellation)
+        logger.info("Calculated world transform of parcellation is $calculatedWorldTransformParcellation.")*/
+
         val testMesh = parcellationObject.children[42] as Mesh
-        val testTransform = parcellationObject.children[42].spatialOrNull()?.world ?: run {
-            logger.warn("World transform of test mesh is null. Applying identity matrix to the vertices instead.")
+        //testMesh.spatial().position = testMesh.spatial().position.add(Vector3f(2f,0f,0f)) //test purposes: transform so that there are definetely streamlines in the area
+        testMesh.spatial().updateWorld(true)
+        val localParcellationTransform = parcellationObject.spatialOrNull()?.model ?: run {
+            logger.warn("Model transform of test mesh is null. Applying identity matrix to the vertices instead.")
             Matrix4f().identity()
         }
-        val testMeshSpecificTransform = parcellationObject.parent?.spatialOrNull()?.world ?: run {
-            logger.warn("World transform of test mesh parent is null. Providing identity matrix to the streamline selection algorithm instead.")
-            Matrix4f().identity()
-        }
+
+        val localMeshTransform = testMesh.spatial().model
+
+        logger.info("Model transform of parcellation is $localParcellationTransform.")
+        logger.info("Model transform of testMesh is $localMeshTransform")
+        logger.info("World transform of test mesh is ${testMesh.spatialOrNull()?.world}.")
+        logger.info("World transform of parcellation parent is ${parcellationObject.parent?.spatialOrNull()?.world}.")
         val verticesBuffer = testMesh.geometry().vertices
+        logger.info("There are ${verticesBuffer.capacity()/3} vertices in the test mesh.")
+        logger.info("Vertex 0 is ${verticesBuffer.get(0)}, ${verticesBuffer.get(1)}, ${verticesBuffer.get(2)}.")
+        val calculatedWorldValueVertex0 = testMesh.spatialOrNull()?.world?.transform(Vector4f(verticesBuffer.get(0), verticesBuffer.get(1), verticesBuffer.get(2), 1f))
+        logger.info("Calculated transformed vertex 0 before mesh transformation is $calculatedWorldValueVertex0.")
         verticesBuffer.rewind()
         while(verticesBuffer.remaining() >= 3){
-            //multiply each vertex with world transform
+            //multiply each vertex with local transform
             val currentPos = verticesBuffer.position()
             val currentVertex = Vector4f(verticesBuffer.get(), verticesBuffer.get(), verticesBuffer.get(), 1f)
-            val transformedVertex = testTransform.transform(currentVertex) //TODO: check if this is the correct order to multiply the two
-            //TODO: doesn't acutally need a new variable, since transformation is directly done on the old object
-            verticesBuffer.put(currentPos, transformedVertex?.x ?: currentVertex.x)
-            verticesBuffer.put(currentPos+1, transformedVertex?.y ?: currentVertex.y)
-            verticesBuffer.put(currentPos+2, transformedVertex?.y ?: currentVertex.z)
+            localMeshTransform.transform(currentVertex)
+            localParcellationTransform.transform(currentVertex)
+            verticesBuffer.put(currentPos, currentVertex.x)
+            verticesBuffer.put(currentPos+1, currentVertex.y)
+            verticesBuffer.put(currentPos+2, currentVertex.z)
             verticesBuffer.position(currentPos+3)
         }
-        verticesBuffer.rewind()
-        //TODO: use inverted matrix to change transform of the mesh
-        //TODO: perhaps only use non-visible object / representation of the mesh object to make calculation that isn't displayed in any way
-        val invertedTransform = testTransform?.invertAffine(testTransform) //TODO: should be affine transformation -> check testTransform if it hast the correct last column, then use invertAffine()
-        //TODO: doesn't acutally have to reassign matrix to invertedTransform, since the inversion already happens directly on the testTransform
+        logger.info("After applying the local transform, vertex 0 is ${verticesBuffer.get(0)}, ${verticesBuffer.get(1)}, ${verticesBuffer.get(2)}.")
+        testMesh.spatial().position = Vector3f(0f,0f,0f)
+        testMesh.spatial().scale = Vector3f(1f,1f,1f)
+        testMesh.spatial().rotation = Quaternionf(0f,0f,0f,1f)
+
+        parcellationObject.spatialOrNull()?.position = Vector3f(0f,0f,0f)
+        parcellationObject.spatialOrNull()?.scale = Vector3f(1f,1f,1f)
+        parcellationObject.spatialOrNull()?.rotation = Quaternionf(0f,0f,0f,1f)
+        testMesh.geometry().dirty = true
         scene.spatial().updateWorld(true)
-        val worldTransform = testMesh.spatial().world
+        logger.info("After applying all identity transforms, model of parcellation object is ${parcellationObject.spatialOrNull()?.model}.")
+        verticesBuffer.rewind()
+
+        logger.info("world transform after using identity transforms is ${testMesh.spatial().world}.")
+        val calculatedWorldValueVertex0After = testMesh.spatialOrNull()?.world?.transform(Vector4f(verticesBuffer.get(0), verticesBuffer.get(1), verticesBuffer.get(2), 1f))
+        logger.info("Calculated transformed vertex 0 after mesh transformation is $calculatedWorldValueVertex0After.")
+        //val worldTransform = testMesh.spatial().world
+        //logger.info("World transform of test mesh is $worldTransform.")
         testMesh.visible = true
-        //parcellationObject.children[42].visible = true
-        //val selectedStreamlines = StreamlineSelector.streamlineSelectionFromPolytope(testMesh, verticesOfStreamlines)
-        val selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(testMesh, verticesOfStreamlines, testMeshSpecificTransform) //use this instead of the testTransform in order to only apply those transformations onto the mesh that differ between tractogram and parcellation
+        //TODO: check if verticesOfStreamlines contain the expected streamlines, since I changed some stuff around that
+        logger.info("Vertices of streamlines contain ${verticesOfStreamlines.size} streamlines.")
+        val selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(testMesh, verticesOfStreamlines, localMeshTransform)
+
+        logger.info("Bounding Box: ${testMesh.boundingBox.toString()} and translation of test mesh: ${testMesh.spatialOrNull()?.worldPosition()}.")
+        tractogramParent.children.get(0).visible = false
         try {
             val selectedTractogram = displayableStreamlinesFromVerticesList(
                 selectedStreamlines.shuffled()
-                    .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>> //TODO: ArrayList cast can't be used with empty arraylist can only be done, if we do have streamlines
+                    .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
             )
             tractogramParent.addChild(selectedTractogram)
         }catch (e: Exception){
-            //TODO: use when-Block to differentiate between different exceptions -> ClassCastException is the first one occuring, if there is an empty list of vertices that get selected
-            logger.warn("Empty list of streamlines. No streamline selection will be displayed.")
+            if(selectedStreamlines.isEmpty()){
+                logger.warn("Empty list of streamlines. No streamline selection will be displayed.")
+            }else{
+                logger.warn("Exception occured: ${e.message}. No streamline selection will be displayed.")
+            }
         }
         //parcellationObject.children[44].visible = true
-        parcellationObject.spatialOrNull()?.scale =
-            parcellationObject.spatialOrNull()?.scale?.mul(10f) ?: Vector3f(1f, 1f, 1f)
-        parcellationObject.spatialOrNull()?.updateWorld(true)
     }
 
     private fun tryTiffVolume(container: RichNode) {
@@ -356,7 +422,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
             // if using a larger dataset, insert a shuffled().take(100) before the forEachIndexed
             val vecVerticesNotCentered = ArrayList<Vector3f>(line.vertices.size / 3)
             line.vertices.toList().windowed(3, 3) { p ->
-                // X axis is inverted compared to the NIFTi coordinate system
+                // X-axis is inverted compared to the NIFTi coordinate system
                 val v = Vector3f(-p[0], p[1], p[2])
                 if(v.length() > 0.001f) {
                     vecVerticesNotCentered.add(v)
@@ -603,7 +669,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
 
             // Color for all curve segements will be the same if SingleMeshCurve is used
             geo.children.forEachIndexed { i, curveSegment ->
-                val verticesDiff = vecVerticesNotCentered[i+1].minus(vecVerticesNotCentered[i] ?: Vector3f(0.0f))
+                val verticesDiff = vecVerticesNotCentered[i+1].minus(vecVerticesNotCentered[i])
                 val localColor = (verticesDiff).normalize()
                 curveSegment.materialOrNull()?.diffuse = when(colorMode) {
                     ColorMode.LocalDirection -> (localColor.plus(Vector3f(0.5f))) / 2.0f

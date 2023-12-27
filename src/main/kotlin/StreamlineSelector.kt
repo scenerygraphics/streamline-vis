@@ -23,6 +23,7 @@ import java.io.IOException
 import java.util.*
 import java.util.function.BiConsumer
 import kotlin.collections.ArrayList
+import kotlin.math.min
 
 
 /**
@@ -341,8 +342,7 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
                 val index2 = ((index - even) / 2)
                 val streamline = streamlines[index2]
                 val streamlinepoint = if(even==0) streamline.first() else streamline.last()
-                //TODO: Scale mesh before using it in this class - get rid of the *10 here
-                val position = RealPoint(streamlinepoint.x*10, streamlinepoint.y*10, streamlinepoint.z*10)
+                val position = RealPoint(streamlinepoint.x, streamlinepoint.y, streamlinepoint.z)
                 position
             }
             return positionsList
