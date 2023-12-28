@@ -81,7 +81,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         applyInvTractogramTransform(tractogram, volume) //TODO: tractogram, volume and parcellation need to align
         container.addChild(volume)
 
-        streamlineSelectionTransformedMesh(parcellationObject, tractogramParent)
+        streamlineSelectionTransformedMesh(parcellationObject, tractogram)
 
         // Try using a .tiff instead of the nifti to load the volume to try, if transformations might be correct, but the nifti format could be faulty
         //tryTiffVolume(container) //currently doesn't work: .tiff doesn't get shown, thus I don't know if it has the right transform
@@ -223,8 +223,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
      * @param tractogramParent Scene object of the tractogram parent, which contains the tractogram
      * @param parcellationObject Scene object of the parcellation, which contains the meshes of the brain regions
      * */
-    private fun streamlineSelectionTransformedMesh(parcellationObject: Node, tractogramParent: RichNode) {
-        parcellationObject.spatialOrNull()?.updateWorld(true)
+    private fun streamlineSelectionTransformedMesh(parcellationObject: Node, tractogram: RichNode) {
         val testMesh = parcellationObject.children[4] as Mesh
         val testMesh2 = parcellationObject.children[44] as Mesh
         parcellationObject.children.forEach { child ->
@@ -232,19 +231,20 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         }
         testMesh.visible = true
         testMesh2.visible = true
-        encodeTransformInMesh(tractogramParent, parcellationObject)
+        encodeTransformInMesh(tractogram, parcellationObject)
 
         val selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(testMesh, verticesOfStreamlines)
         val selectedStreamlines2 = StreamlineSelector.preciseStreamlineSelection(testMesh2, selectedStreamlines as java.util.ArrayList<java.util.ArrayList<Vector3f>>)
 
+
         logger.info("Bounding Box: ${testMesh.boundingBox.toString()} and translation of test mesh: ${testMesh.spatialOrNull()?.worldPosition()}.")
-        tractogramParent.children[0].visible = false
+        tractogram.visible = false
         try {
             val selectedTractogram = displayableStreamlinesFromVerticesList(
                 selectedStreamlines2.shuffled()
                     .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
             )
-            tractogramParent.addChild(selectedTractogram)
+            tractogram.parent?.addChild(selectedTractogram)
         }catch (e: Exception){
             if(selectedStreamlines2.isEmpty()){
                 logger.warn("Empty list of streamlines. No streamline selection will be displayed.")
@@ -252,86 +252,58 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
                 logger.warn("Exception occurred: ${e.message}. No streamline selection will be displayed.")
             }
         }
-        //parcellationObject.children[44].visible = true
     }
 
     private fun encodeTransformInMesh(
-        tractogramParent: RichNode,
+        tractogram: RichNode,
         parcellationObject: Node
     ) {
-        //TODO: Use the following to check if modelTransform contains exactly rotation, translation, scaling, nothing more
-        /*logger.info("Local translation of parcellation is $localTranslationParcellation.")
+        scene.spatial().updateWorld(true)
 
-        val localRotationParcellation = parcellationObject.spatialOrNull()?.rotation ?: run {
-            logger.warn("Local rotation of parcellation is null. Applying identity matrix to the vertices instead.")
-            Quaternionf(0f, 0f, 0f, 0f)
-        }
-        logger.info("Local rotation of parcellation is $localRotationParcellation.")
-        val localScaleParcellation = parcellationObject.spatialOrNull()?.scale ?: run {
-            logger.warn("Local scale of parcellation is null. Applying identity matrix to the vertices instead.")
-            Vector3f(1f, 1f, 1f)
-        }
-        logger.info("Local scale of parcellation is $localScaleParcellation.")
-        val localTransformParcellation = parcellationObject.spatialOrNull()?.model
-        logger.info("Local transform of parcellation is $localTransformParcellation.")
-
-        val translationMatrix = Matrix4f().translate(localTranslationParcellation)
-        val rotationMatrix = Matrix4f().rotate(localRotationParcellation)
-        val scaleMatrix = Matrix4f().scale(localScaleParcellation)
-        val calculatedModelParcellation = translationMatrix.mul(rotationMatrix).mul(scaleMatrix)
-        logger.info("Calculated local transform of parcellation is $calculatedModelParcellation.")*/
-
-        //TODO: Use the following to test, if streamlines really aren't transformed in any way
-        /*tractogramParent.children.get(0).children.forEach { streamline ->
+        //  Check assumptions, that single Streamlines and tractogram as a whole are not transformed locally
+        //  TODO: if this assumption is not met, the local transforms needs to be applied to the vertices of the streamlines, before selecting streamlines
+        tractogram.children.forEach { streamline ->
             val spatial = streamline.spatialOrNull()
-            val testMeshLocalTransform = spatial?.model
-            val testMeshTranslation = spatial?.position
-            val testMeshRotation = spatial?.rotation
-            val testMeshScale = spatial?.scale
-            if(testMeshLocalTransform!=Matrix4f().identity()||testMeshTranslation!=Vector3f(0f,0f,0f)||testMeshRotation!=Quaternionf(0f,0f,0f,1f)||testMeshScale!=Vector3f(1f,1f,1f)){
-                logger.info("Local transform of streamline ${streamline.name} is $testMeshLocalTransform.")
-                logger.info("Local translation of streamline ${streamline.name} is $testMeshTranslation.")
-                logger.info("Local rotation of streamline ${streamline.name} is $testMeshRotation.")
-                logger.info("Local scale of streamline ${streamline.name} is $testMeshScale.")
+            val localTransform = spatial?.model ?: Matrix4f().identity()
+            if(localTransform != Matrix4f().identity()){
+                logger.warn("Streamline ${streamline.name} is transformed by local matrix: $localTransform." +
+                        "Streamline selection might not work correctly, since it assumes no transform of the single" +
+                        "streamline.")
             }
-        }*/
+        }
+        val tractogramLocalTransform = tractogram.spatial().model
+        if(tractogramLocalTransform != Matrix4f().identity()){
+            logger.warn("Tractogram is transformed by local matrix: ${tractogramLocalTransform}." +
+                    "Streamline selection might not work correctly, since it assumes no transform of the tractogram.")
+        }
 
-        logger.info(
-            "tractogram is transformed by local matrix: ${
-                tractogramParent.children[0].spatialOrNull()?.model
-            }."
-        )
 
-        /* //TODO: Use this to check if correct
-        val calculatedWorldTransformParcellation = testMeshSpecificTransform.mul(localTransformParcellation)
-        logger.info("Calculated world transform of parcellation is $calculatedWorldTransformParcellation.")*/
-
-        //testMesh.spatial().position = testMesh.spatial().position.add(Vector3f(2f,0f,0f)) //test purposes: transform so that there are definitely streamlines in the area
-        //testMesh.spatial().updateWorld(true) //before calling this method an update over all objects is done, so this method should not be needed (only if any transformation happened in between)
+        // Get local parcellation transformation matrix
         val localParcellationTransform = parcellationObject.spatialOrNull()?.model ?: run {
             logger.warn("Model transform of test mesh is null. Applying identity matrix to the vertices instead.")
             Matrix4f().identity()
         }
-        logger.info("Model transform of parcellation is $localParcellationTransform.")
-        logger.info("World transform of parcellation parent is ${parcellationObject.parent?.spatialOrNull()?.world}.")
 
-        parcellationObject.children.forEach {testMesh ->
-            testMesh as Mesh
-            val localMeshTransform = testMesh.spatial().model
-            //logger.info("Model transform of testMesh is $localMeshTransform")
-            //logger.info("World transform of test mesh is ${testMesh.spatialOrNull()?.world}.")
-            val verticesBuffer = testMesh.geometry().vertices
-            //logger.info("There are ${verticesBuffer.capacity() / 3} vertices in the test mesh.")
-            //logger.info("Vertex 0 is ${verticesBuffer.get(0)}, ${verticesBuffer.get(1)}, ${verticesBuffer.get(2)}.")
-            /*val calculatedWorldValueVertex0 = testMesh.spatialOrNull()?.world?.transform(
-                Vector4f(
-                    verticesBuffer.get(0),
-                    verticesBuffer.get(1),
-                    verticesBuffer.get(2),
-                    1f
-                )
-            )*/
-            //logger.info("Calculated transformed vertex 0 before mesh transformation is $calculatedWorldValueVertex0.")
+        /*
+             * Check assumption, that applying local transform of parcellation to the world transformation of its parent
+             * will be equivalent to the world transformation of the parcellation itself. The local transform of the
+             * parcellation is a concatenation of translation, rotation and scaling. If the calculated transforms don't
+             * match up, there might be an additional shearing component.
+        */
+        val worldTransformParcellationParent = Matrix4f().set(parcellationObject.parent?.spatialOrNull()?.world
+            ?: Matrix4f().identity()) // TODO: ERROR MANAGEMENT, tolerance
+        worldTransformParcellationParent.mul(localParcellationTransform)
+        if(worldTransformParcellationParent != parcellationObject.spatialOrNull()?.world){
+            logger.warn("World transform of parcellation object does not match with composition of world transform" +
+                    "of it's parent with local transform of itself. There might be a shearing component that" +
+                    "is not accounted for in the model matrix (local transform).")
+        }
+
+        parcellationObject.children.forEach {mesh ->
+            mesh as Mesh
+            val localMeshTransform = mesh.spatial().model
+            val verticesBuffer = mesh.geometry().vertices
+
             verticesBuffer.rewind()
             while (verticesBuffer.remaining() >= 3) {
                 //multiply each vertex with local transform
@@ -344,40 +316,20 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
                 verticesBuffer.put(currentPos + 2, currentVertex.z)
                 verticesBuffer.position(currentPos + 3)
             }
-            /*logger.info(
-                "After applying the local transform, vertex 0 is ${verticesBuffer.get(0)}, ${verticesBuffer.get(1)}, ${
-                    verticesBuffer.get(
-                        2
-                    )
-                }."
-            )*/
-            testMesh.spatial().position = Vector3f(0f, 0f, 0f)
-            testMesh.spatial().scale = Vector3f(1f, 1f, 1f)
-            testMesh.spatial().rotation = Quaternionf(0f, 0f, 0f, 1f)
-            testMesh.geometry().dirty = true
+
+            mesh.spatial().position = Vector3f(0f, 0f, 0f)
+            mesh.spatial().scale = Vector3f(1f, 1f, 1f)
+            mesh.spatial().rotation = Quaternionf(0f, 0f, 0f, 1f)
+            mesh.geometry().dirty = true
             verticesBuffer.rewind()
-            //perhaps updateWorld?
+
+            mesh.spatial().updateWorld(true)
         }
 
         parcellationObject.spatialOrNull()?.position = Vector3f(0f, 0f, 0f)
         parcellationObject.spatialOrNull()?.scale = Vector3f(1f, 1f, 1f)
         parcellationObject.spatialOrNull()?.rotation = Quaternionf(0f, 0f, 0f, 1f)
         scene.spatial().updateWorld(true)
-        logger.info("After applying all identity transforms, model of parcellation object is ${parcellationObject.spatialOrNull()?.model}.")
-
-        //logger.info("world transform after using identity transforms is ${testMesh.spatial().world}.")
-        /*val calculatedWorldValueVertex0After = testMesh.spatialOrNull()?.world?.transform(
-            Vector4f(
-                verticesBuffer.get(0),
-                verticesBuffer.get(1),
-                verticesBuffer.get(2),
-                1f
-            )
-        )*/
-        //logger.info("Calculated transformed vertex 0 after mesh transformation is $calculatedWorldValueVertex0After.")
-        //val worldTransform = testMesh.spatial().world
-        //logger.info("World transform of test mesh is $worldTransform.")
-        //TODO: check if verticesOfStreamlines contain the expected streamlines, since I changed some stuff around that
     }
 
     private fun tryTiffVolume(container: RichNode) {
