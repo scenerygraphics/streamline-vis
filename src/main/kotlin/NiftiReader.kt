@@ -47,7 +47,6 @@ class NiftiReader { //TODO: make dataclass
             val niftiMetadataRaw = HashMap<String, Any>()
             nifti.metadata.table.forEach { key, value ->
                 niftiMetadataRaw[key] = value
-                println(key + " -> " + value)
             }
             return niftiMetadataRaw
         }
@@ -123,7 +122,7 @@ class NiftiReader { //TODO: make dataclass
             val parcellationImg = parcellationImg as Img<IntType>
 
             //Reads in translation between integer labels and label names
-            val labelmap = ParcellationReader().readCsv(csvPath)
+            val labelmap = ParcellationReader.readCsv(csvPath)
 
             //var pixelSet = HashSet<Int>()
             parcellationImg.forEach {pixel ->
@@ -136,7 +135,7 @@ class NiftiReader { //TODO: make dataclass
                 Log.info("Label number " + it + " which is brain region " + labelmap.get(it) + " is part of this image")
             }*/
             // variable "labels" is used as a list that maps the pixel values in the image (Indices of the list) to the label number (list value at that index)
-            // Since the pxiel values already equal the desired label numbers, this is just a list of subsequent numbers till the highest possible lable number
+            // Since the pxiel values already equal the desired label numbers, this is just a list of subsequent numbers till the highest possible label number
             val labels = (0 .. (labelmap.keys.maxOrNull()?.toInt() ?: 1)).toList()
             //Log.info("There are " + labels.size + " label numbers")
             val labeling = ImgLabeling.fromImageAndLabels(parcellationImg, labels)
@@ -144,7 +143,7 @@ class NiftiReader { //TODO: make dataclass
             //Log.info("There are " + regions.count() + "regions")
 
             val parcellationContainer = RichNode()
-            val labelMap = ParcellationReader().readCsv(csvPath)
+            val labelMap = ParcellationReader.readCsv(csvPath)
             val brainAreasList = ArrayList<String>()
 
             regions.forEachIndexed { _, region ->

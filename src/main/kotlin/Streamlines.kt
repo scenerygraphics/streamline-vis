@@ -16,9 +16,13 @@ import graphics.scenery.volumes.Colormap
 import graphics.scenery.volumes.TransferFunction
 import graphics.scenery.volumes.Volume
 import org.joml.*
+import org.scijava.log.LogService
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.nio.file.Paths
 import java.util.*
+import java.util.stream.Stream
 import kotlin.collections.ArrayList
 import kotlin.math.*
 
@@ -29,7 +33,7 @@ import kotlin.math.*
  * @author Justin Buerger <burger@mpi-cbg.de>
  * @author Ulrik Guenther <hello@ulrik.is>
  */
-class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no cookies", windowWidth = 1280, windowHeight = 720) {
+class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, private val hub: Hub){
 
     enum class ColorMode {
         LocalDirection,
@@ -39,26 +43,11 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
     private var colorMode = ColorMode.GlobalDirection
     private var verticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
     private var selectionVerticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
-    private var _maximumStreamlineCount: Int = maximumStreamlineCount
-    /**
-     * Sets up the initial scene and reads all relevant parameters from the configuration.
-     * The initial scene in particular contains a tractogram, read from a .trx file, a parcellation,
-     * read from an .obj file, which holds meshes of relevant brain regions and a volume,
-     * read from a .nifti file, which shows the whole brain.
-     * */
-    override fun init() {
-        defaultScene()
+    var _maximumStreamlineCount: Int = maximumStreamlineCount
+    private val logger = LoggerFactory.getLogger(Streamlines::class.java)
 
-        // Example input to test code
-        //TODO: Test folder with this data and test class
-        val volumeDataset = System.getProperty("dataset") //in sciView user input, here test case: rather store in test-folder
-        val trx = System.getProperty("trx") //in sciView user input, here test case: rather store in test-folder
-        val parcellationPath = System.getProperty("parcellationPath")
-        val csvPath = System.getProperty("csvPath")
-        _maximumStreamlineCount = System.getProperty("maxStreamlines", "5000").toInt()
-
-        logger.info("Loading volume from $volumeDataset and TRX tractogram from $trx, will show $_maximumStreamlineCount streamlines max.")
-
+    data class Components(val container: RichNode, val tractogramParent: RichNode, val tractogram: RichNode, val parcellationObject: RichNode)
+    fun setUp(trx: String, parcellationPath: String, csvPath: String, volumeDataset: String): Components{
         val container = RichNode()
         container.spatial().rotation = Quaternionf().rotationX(-PI.toFloat()/2.0f)
         container.name = "brain parent"
@@ -72,7 +61,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         container.addChild(tractogramParent)
 
         //load parcellation from file
-        val parcellationObject = NiftiReader.niftiFromFile(parcellationPath, hub, csvPath)
+        val parcellationObject = NiftiReader.niftiFromFile(parcellationPath, hub, csvPath) as RichNode
         tractogramParent.addChild(parcellationObject)
         scene.spatial().updateWorld(true)
 
@@ -81,10 +70,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         applyInvTractogramTransform(tractogram, volume) //TODO: tractogram, volume and parcellation need to align
         container.addChild(volume)
 
-        streamlineSelectionTransformedMesh(parcellationObject, tractogram)
-
-        // Try using a .tiff instead of the nifti to load the volume to try, if transformations might be correct, but the nifti format could be faulty
-        //tryTiffVolume(container) //currently doesn't work: .tiff doesn't get shown, thus I don't know if it has the right transform
+        return Components(container, tractogramParent, tractogram, parcellationObject)
     }
 
     /**
@@ -175,78 +161,35 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         volume.spatialOrNull()?.wantsComposeModel = true*/
     }
 
-    private fun defaultScene() {
-        val propertiesFile = File(this::class.java.simpleName + ".properties")
-        if (propertiesFile.exists()) {
-            val p = Properties()
-            p.load(propertiesFile.inputStream())
-            logger.info("Loaded properties from $propertiesFile:")
-            p.forEach { k, v ->
-                logger.info(" * $k=$v")
-                System.setProperty(k as String, v as String)
-            }
-        }
-
-        renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
-
-        val lightbox = Box(Vector3f(75.0f, 75.0f, 75.0f), insideNormals = true)
-        lightbox.name = "Lightbox"
-        lightbox.material {
-            diffuse = Vector3f(0.1f, 0.1f, 0.1f)
-            roughness = 1.0f
-            metallic = 0.0f
-            cullingMode = Material.CullingMode.None
-        }
-        scene.addChild(lightbox)
-        val ambient = AmbientLight(intensity = 0.5f)
-        scene.addChild(ambient)
-
-        Light.createLightTetrahedron<PointLight>(spread = 2.0f, intensity = 5.0f)
-            .forEach {
-                it.emissionColor = Random.random3DVectorFromRange(0.2f, 0.8f)
-                scene.addChild(it)
-            }
-
-        val cam: Camera = DetachedHeadCamera()
-        cam.spatial {
-            position = Vector3f(0.0f, 0.0f, 10.0f)
-        }
-        cam.perspectiveCamera(50.0f, windowWidth, windowHeight)
-        scene.addChild(cam)
-    }
-
     /**
      * Function is used to test, if transforming the parcellation mesh directly via its vertices leads to a correct
      * overlay of parcellation and tractogram, so that a streamline selection can be done.
      *
      * Idea: Transform vertices of the parcellation mesh by world transform and then transform
-     * @param tractogramParent Scene object of the tractogram parent, which contains the tractogram
+     * @param tractogram Scene object of the tractogram parent, which contains the tractogram
      * @param parcellationObject Scene object of the parcellation, which contains the meshes of the brain regions
      * */
-    private fun streamlineSelectionTransformedMesh(parcellationObject: Node, tractogram: RichNode) {
-        val testMesh = parcellationObject.children[4] as Mesh
-        val testMesh2 = parcellationObject.children[44] as Mesh
+    fun streamlineSelectionTransformedMesh(parcellationObject: Node, tractogram: RichNode, meshes: List<Mesh>) {
+        scene.spatial().updateWorld(true)
+        encodeTransformInMesh(tractogram, parcellationObject)
         parcellationObject.children.forEach { child ->
             child.visible = false
         }
-        testMesh.visible = true
-        testMesh2.visible = true
-        encodeTransformInMesh(tractogram, parcellationObject)
+        var selectedStreamlines = verticesOfStreamlines
+        meshes.forEach{ mesh ->
+            mesh.visible = true
+            selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(mesh, selectedStreamlines) as java.util.ArrayList<java.util.ArrayList<Vector3f>>
+        }
 
-        val selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(testMesh, verticesOfStreamlines)
-        val selectedStreamlines2 = StreamlineSelector.preciseStreamlineSelection(testMesh2, selectedStreamlines as java.util.ArrayList<java.util.ArrayList<Vector3f>>)
-
-
-        logger.info("Bounding Box: ${testMesh.boundingBox.toString()} and translation of test mesh: ${testMesh.spatialOrNull()?.worldPosition()}.")
         tractogram.visible = false
         try {
             val selectedTractogram = displayableStreamlinesFromVerticesList(
-                selectedStreamlines2.shuffled()
+                selectedStreamlines.shuffled()
                     .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
             )
             tractogram.parent?.addChild(selectedTractogram)
         }catch (e: Exception){
-            if(selectedStreamlines2.isEmpty()){
+            if(selectedStreamlines.isEmpty()){
                 logger.warn("Empty list of streamlines. No streamline selection will be displayed.")
             }else{
                 logger.warn("Exception occurred: ${e.message}. No streamline selection will be displayed.")
@@ -254,7 +197,15 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
         }
     }
 
-    private fun encodeTransformInMesh(
+    /**
+     * Encodes local transforms of parcellation meshes and the parcellation object (parent of all meshes) into
+     * the vertices of the meshes. Then transforms the meshes and the parcellation object back, so that their
+     * positions, orientations and scaling haven't changed visually.
+     *
+     * @param tractogram Scene object of the tractogram
+     * @param parcellationObject Scene object of the parcellation, which contains the meshes of the brain regions
+     * */
+    fun encodeTransformInMesh(
         tractogram: RichNode,
         parcellationObject: Node
     ) {
@@ -517,7 +468,8 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
      * Handles the input: If there is a double click on mesh / brain region, a streamline selection is done and
      * rendered instead of a whole tractogram
      * */
-    override fun inputSetup() {
+    //only used when setting up a scene on my own
+    /*override fun inputSetup() {
         super.inputSetup()
         setupCameraModeSwitching()
 
@@ -574,14 +526,9 @@ class Streamlines(maximumStreamlineCount: Int = 1000): SceneryBase("No arms, no 
                 ))
         }
         inputHandler?.addKeyBinding("selectStreamlines", "double-click button1")
-    }
+    }*/
 
     companion object {
-        @JvmStatic
-        fun main(args: Array<String>) {
-            Streamlines().main()
-        }
-
         private val baseList = listOf(
             Vector3f(0.1f, 0.1f, 0f).times(0.1f),
             Vector3f(0.1f, -0.1f, 0f).times(0.1f),

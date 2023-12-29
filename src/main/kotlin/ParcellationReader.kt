@@ -14,47 +14,9 @@ import java.io.InputStream
 import kotlin.math.sqrt
 
 class ParcellationReader {
-    val idList : MutableList<Int> = mutableListOf()
+    //val idList : MutableList<Int> = mutableListOf()
     var parcellationMetadata = HashMap<String, Any>()
-    private val logger by LazyLogger()
-
-    /**
-     * Reads .csv file that contains a mapping between label numbers and their names and colors.
-     * Writes this mapping into a HashMap
-     *
-     * @param csvFile Path to csv file that is read
-     * @return HashMap with mapping between label number (key) and label name and color (value)
-     * */
-    fun readCsv(csvFile: String): HashMap<Int, Pair<String, Vector4d>> {
-        val dict : HashMap<Int, Pair<String, Vector4d>> = hashMapOf()
-        val colorList : MutableList<Vector4d> = mutableListOf()
-        //TODO: check correct file format
-
-        try {
-            val fileReader = FileReader(csvFile)
-            val csvReader = CSVReader(fileReader)
-
-            var record: Array<String>?
-            while (csvReader.readNext().also { record = it } != null) {
-                val id = record?.get(0)?.toIntOrNull() ?: continue
-                if(record!!.size == 6){
-                    val name = record!!.get(1)
-                    val color = Vector4d(record!!.get(2).toDouble(), record!!.get(3).toDouble(), record!!.get(4).toDouble(), record!!.get(5).toDouble())
-                    dict.put(id, Pair(name, color))
-                    idList.add(id)
-                    colorList.add(color)
-                    //println(dict.get(id)!!.first) //prints the names of all brain regions within the parcellation file
-                }
-            }
-
-            csvReader.close()
-            fileReader.close()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        return dict
-    }
+    //private val logger by LazyLogger()
 
     /**
      * Reads parcellation .nifti and merges it with information of the .csv label map to get a LabelRegions object.
@@ -90,7 +52,7 @@ class ParcellationReader {
             parcellationImg = parcellationImg as Img<IntType>
 
             //Reads in translation between integer labels and label names
-            val labelmap = ParcellationReader().readCsv(csvPath)
+            val labelmap = readCsv(csvPath)
 
             //var pixelSet = HashSet<Int>()
             parcellationImg.forEach {pixel ->
@@ -179,6 +141,47 @@ class ParcellationReader {
             tempMap["model"] = transform //Doesn't hold any value
         }
         return tempMap
+    }
+
+    companion object{
+        /**
+         * Reads .csv file that contains a mapping between label numbers and their names and colors.
+         * Writes this mapping into a HashMap
+         *
+         * @param csvFile Path to csv file that is read
+         * @return HashMap with mapping between label number (key) and label name and color (value)
+         * */
+        fun readCsv(csvFile: String): HashMap<Int, Pair<String, Vector4d>> {
+            val dict : HashMap<Int, Pair<String, Vector4d>> = hashMapOf()
+            val colorList : MutableList<Vector4d> = mutableListOf()
+            //TODO: check correct file format
+
+            try {
+                val fileReader = FileReader(csvFile)
+                val csvReader = CSVReader(fileReader)
+
+                var record: Array<String>?
+                while (csvReader.readNext().also { record = it } != null) {
+                    val id = record?.get(0)?.toIntOrNull() ?: continue
+                    if(record!!.size == 6){
+                        val name = record!!.get(1)
+                        val color = Vector4d(record!!.get(2).toDouble(), record!!.get(3).toDouble(), record!!.get(4).toDouble(), record!!.get(5).toDouble())
+                        dict.put(id, Pair(name, color))
+                        //idList.add(id)
+                        colorList.add(color)
+                        //println(dict.get(id)!!.first) //prints the names of all brain regions within the parcellation file
+                    }
+                }
+
+                csvReader.close()
+                fileReader.close()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            return dict
+        }
+
     }
 }
 

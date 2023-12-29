@@ -196,19 +196,18 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * Determines all streamlines that precisely start or end in a given mesh.
          * Make sure that the mesh and streamlines are in the same space, before using this method!
          *
-         * @param mesh Scenery-Mesh that is used to select streamlines
+         * @param sceneryMesh Scenery-Mesh that is used to select streamlines
          * @param streamlines List of all streamlines to be selected from
          * @return List of streamlines that got selected
          * */
-        //fun preciseStreamlineSelection(mesh: Mesh, meshTransform: Matrix4f, streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>, streamlineTransform: Matrix4f) : List<java.util.ArrayList<Vector3f>>{
         fun preciseStreamlineSelection(sceneryMesh: Mesh, streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>) : List<java.util.ArrayList<Vector3f>>{
             val imgJMesh = MeshConverter.toImageJ(sceneryMesh)
 
             val insideMask = insidePoints(imgJMesh, startAndEndPointList(streamlines))
-            var streamlineSelection = streamlines.filterIndexed { index, _ ->
+            val streamlineSelection = streamlines.filterIndexed { index, _ ->
                 insideMask.getOrNull(index) == true
             }
-            //var streamlineSelection = streamlines.take(10) //Dummy-Line to give back a Streamline selection, that can be displayed without time consuming calcuation
+            //var streamlineSelection = streamlines.take(10) //Dummy-Line to give back a Streamline selection, that can be displayed without time-consuming calculation
             return streamlineSelection
         }
 
@@ -219,7 +218,6 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * @param streamlines All streamlines from which should be selected
          * @return List of selected Streamlines (List of List of Points in a single streamline) that start or finish in the given polytope
          * */
-        //fun streamlineSelectionFromPolytope(selectedArea: HasSpatial?, transformSelectedArea: Matrix4f, streamlines: java.util.ArrayList<java.util.ArrayList<Vector3f>>, tranformStreamlines: Matrix4f): java.util.ArrayList<java.util.ArrayList<Vector3f>> {
         fun streamlineSelectionFromPolytope(selectedArea: HasSpatial?, streamlines: java.util.ArrayList<java.util.ArrayList<Vector3f>>): java.util.ArrayList<java.util.ArrayList<Vector3f>> { //TODO: transformations need to be applied to polytope before using in this function
             /*
             * Calculation of the Hyperplanes that form the bounding box.
@@ -248,7 +246,7 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
             * since an initial KD-tree gets created in init().
             * */
             val localKDTree : KDTree<Vector2i>
-            //TODO: Think of a new way to not always recreate the KD-tree: the global variables gloablKDTree and verticesOfStreamlines come from the Streamlines-Class
+            //TODO: Think of a new way to not always recreate the KD-tree: the global variables globalKDTree and verticesOfStreamlines come from the Streamlines-Class
             /*if(streamlines == verticesOfStreamlines){
                 localKDTree = globalKDTree
             }else{
@@ -280,14 +278,14 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
         }
 
         /**
-         * Creates a imglib2 KDTree datastructure that only contains all starting and end points of a given streamline list.
+         * Creates an imglib2 KDTree data structure that only contains all starting and end points of a given streamline list.
          *
          * @param streamlines List of list of vertices contained in a single streamline.
          * Only the first and last vertex of every streamline is stored inside the KD-tree, because these are the points
          * which need to efficiently be searched.
          * @return KD-tree data structure holding all points where a streamline either starts or ends
          * */
-        fun createKDTree(streamlines: java.util.ArrayList<java.util.ArrayList<Vector3f>>) : KDTree<Vector2i> {
+        private fun createKDTree(streamlines: java.util.ArrayList<java.util.ArrayList<Vector3f>>) : KDTree<Vector2i> {
             val listLength = streamlines.size*2
             val valuesList = List(listLength){ index ->
                 val even = index % 2
@@ -302,12 +300,12 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * Provides a list of all points of a point cloud that lie within a mesh.
          * More precise than a test for insideness with bounding boxes.
          *
-         * @param mesh of which insideness is tested
+         * @param imgJMesh of which insideness is tested
          * @param pointCloud list of points from which should be selected
          * @return list of indices of selected points
          * */
         //TODO: Do we need to test watertightness?
-        fun insidePoints(imgJMesh : net.imglib2.mesh.Mesh, pointCloud: List<RealPoint>): ArrayList<Boolean>{
+        private fun insidePoints(imgJMesh : net.imglib2.mesh.Mesh, pointCloud: List<RealPoint>): ArrayList<Boolean>{
             val interiorPointTest = Interior(imgJMesh, 1.0)
             val insideMask = ArrayList<Boolean>(pointCloud.size/2)
 
@@ -326,13 +324,13 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * @param streamlines Streamlines of which start and end points are to be determined
          * @return List of start and end points of all streamlines
          * */
-        fun startAndEndPointList(streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>): List<RealPoint>{
+        private fun startAndEndPointList(streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>): List<RealPoint>{
             val positionsList = List(streamlines.size*2){ index ->
                 val even = index % 2
                 val index2 = ((index - even) / 2)
                 val streamline = streamlines[index2]
-                val streamlinepoint = if(even==0) streamline.first() else streamline.last()
-                val position = RealPoint(streamlinepoint.x, streamlinepoint.y, streamlinepoint.z)
+                val streamlinePoint = if(even==0) streamline.first() else streamline.last()
+                val position = RealPoint(streamlinePoint.x, streamlinePoint.y, streamlinePoint.z)
                 position
             }
             return positionsList
