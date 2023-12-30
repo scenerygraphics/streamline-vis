@@ -5,34 +5,79 @@ import graphics.scenery.numerics.Random
 import org.joml.Vector3f
 import java.io.File
 import java.util.*
+import kotlin.collections.ArrayList
 
+/**
+ * Class sets up a default scene and tests functionality of TractogramTools and StreamlineSelector to be checked
+ * visually.
+ * */
 class ExampleScene : SceneryBase("No arms, no cookies", windowWidth = 1280, windowHeight = 720) {
-    private lateinit var streams : Streamlines
-    private lateinit var sceneComponents : Streamlines.Components
+    private lateinit var tractogramTools : TractogramTools
+    private lateinit var sceneComponents : TractogramTools.Components
+    private lateinit var dataPath : String
 
     /**
-     * Sets up the initial scene and reads all relevant parameters from the configuration.
-     * The initial scene in particular contains a tractogram, read from a .trx file, a parcellation,
-     * read from an .obj file, which holds meshes of relevant brain regions and a volume,
-     * read from a .nifti file, which shows the whole brain.
+     * Sets up the initial scene with test data and tests functionality of TractogramTools.
      * */
     override fun init() {
-        streams = Streamlines(1000, this.scene, this.hub)
         defaultScene()
-        setUpDatasets()
-        streamlineSelectionTest()
+        dataPath = System.getProperty("datasets")
 
-        // Try using a .tiff instead of the nifti to load the volume to try, if transformations might be correct, but the nifti format could be faulty
-        //tryTiffVolume(container) //currently doesn't work: .tiff doesn't get shown, thus I don't know if it has the right transform
+        testTractogramTools()
+        //testStreamlineSelector()
     }
 
-    private fun streamlineSelectionTest(){
+    private fun testStreamlineSelector() {
+        // Tests of Streamline Selector with test objects
+        val firstMesh = datasetSetupStreamlineSelector()
+        testPointCloud(firstMesh, scene)
+        firstMesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
+    }
+
+    private fun datasetSetupStreamlineSelector(): Mesh {
+        // The following parcellation mesh was created outside of Scenery
+        val parcellationMeshPath = "$dataPath\\scenery_tractography_vis_cortex_labels.nii.gz.obj"
+        val parcellationMesh = Mesh()
+        parcellationMesh.readFrom(parcellationMeshPath)
+        val firstMesh = parcellationMesh.children[0] as Mesh
+        firstMesh.materialOrNull().blending =
+            Blending(
+                transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
+                destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha
+            )
+        scene.addChild(firstMesh)
+        return firstMesh
+    }
+
+    private fun testTractogramTools() {
+        tractogramTools = TractogramTools(1000, this.scene, this.hub)
+        setUpDatasetsTractogramTools()
+        scene.addChild(sceneComponents.container)
+        streamlineSelectionTestTractogramTools()
+
+        // Try using a .tiff instead of the nifti to load the volume
+        // Could help to gather information about why transforming the nifti with its metadata does not align it with
+        // the other scene objects
+        //val tiffPath = "$dataPath\\scenery_tractography_vis_cortex1_ushort.nii.tif"
+        //addTiffVolume(container) //currently doesn't work: .tiff doesn't get shown, thus I don't know if it has the right transform
+    }
+
+    /**
+     * Tests streamline selection functionality of TractogramTools with two test meshes.
+     * */
+    private fun streamlineSelectionTestTractogramTools(){
         val meshes = ArrayList<Mesh>(2)
         meshes.add(sceneComponents.parcellationObject.children[4] as Mesh)
+        logger.info("Calculating selection for mesh ${sceneComponents.parcellationObject.children[4].name}")
         meshes.add(sceneComponents.parcellationObject.children[44] as Mesh)
-        streams.streamlineSelectionTransformedMesh(sceneComponents.parcellationObject, sceneComponents.tractogram, meshes)
+        logger.info("Calculating selection for mesh ${sceneComponents.parcellationObject.children[44].name}")
+        val reducedTractogram = tractogramTools.streamlineSelectionTransformedMesh(sceneComponents.parcellationObject, sceneComponents.tractogram, meshes)
+        sceneComponents.tractogramParent.addChild(reducedTractogram)
     }
 
+    /**
+     * Creates default scene with lightbox, lights, renderer and camera in which all other elements can be displayed.
+     * */
     private fun defaultScene() {
         val propertiesFile = File(this::class.java.simpleName + ".properties")
         if (propertiesFile.exists()) {
@@ -73,16 +118,49 @@ class ExampleScene : SceneryBase("No arms, no cookies", windowWidth = 1280, wind
         scene.addChild(cam)
     }
 
-    private fun setUpDatasets(){
-        val dataPath = System.getProperty("datasets")
+    /**
+     * Reads data path from System properties, holds information on where all datasets are located and loads them
+     * with TractogramTools.
+     * */
+    private fun setUpDatasetsTractogramTools(){
         val volumeDataset =
             "$dataPath\\scenery_tractography_vis_cortex1_ushort.nii.gz"
         val trx = "$dataPath\\scenery_tractography_vis_wholebrain_newreference.trx"
         val parcellationPath = "$dataPath\\scenery_tractography_vis_cortex_labels.nii.gz"
         val csvPath = "$dataPath\\ctab_lhrh_vol.csv"
 
-        sceneComponents = streams.setUp(trx, parcellationPath, csvPath, volumeDataset)
+        sceneComponents = tractogramTools.setUp(trx, parcellationPath, csvPath, volumeDataset)
     }
+
+    /**
+     * Tests the function preciseStreamlineSelection of class StreamlineSelector with an example mesh and 100,000 sample points
+     * Can show spheres where points are selected, so it can be used to check which points are selected visually;
+     * */
+    private fun testPointCloud(mesh : Mesh, container : Node) {
+        val parentContainer = RichNode()
+        container.addChild(parentContainer)
+
+        val pointList = ArrayList<ArrayList<Vector3f>>()
+        for (i in 0..9999) {
+            val x = (40 * Math.random()).toFloat()-3
+            val y = (90 * Math.random()).toFloat()-82
+            val z = (70 * Math.random()).toFloat()+20
+            val point = Vector3f(x, y, z)
+            pointList.add(arrayListOf(point))
+        }
+
+        val streamlineSelection = StreamlineSelector.preciseStreamlineSelection(mesh, pointList)
+        streamlineSelection.forEach {singlePointList ->
+            val sphere = Sphere()
+            sphere.spatial().position = singlePointList[0]
+            sphere.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
+            sphere.material().wireframe = true
+            parentContainer.addChild(sphere) }
+
+        parentContainer.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
+    }
+
+
 
     companion object {
         @JvmStatic

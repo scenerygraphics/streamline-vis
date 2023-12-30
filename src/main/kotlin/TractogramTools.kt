@@ -1,13 +1,8 @@
 import graphics.scenery.*
-import graphics.scenery.attribute.material.Material
-import graphics.scenery.attribute.spatial.HasSpatial
-import graphics.scenery.backends.Renderer
-import graphics.scenery.controls.behaviours.SelectCommand
 import graphics.scenery.geometry.Curve //Use with scenery commit 7a924aba (older code) to display Streamlines
 import graphics.scenery.geometry.UniformBSpline
 //import graphics.scenery.geometry.curve.BaseShapesFromSingleShape //Use with scenery curve_restructuring-SNAPSHOT (newer code) to display Streamlines
 //import graphics.scenery.geometry.curve.DefaultCurve //Use with scenery curve_restructuring-SNAPSHOT (newer code) to display Streamlines
-import graphics.scenery.numerics.Random
 import graphics.scenery.trx.TRXReader
 import graphics.scenery.utils.extensions.minus
 import graphics.scenery.utils.extensions.plus
@@ -16,13 +11,8 @@ import graphics.scenery.volumes.Colormap
 import graphics.scenery.volumes.TransferFunction
 import graphics.scenery.volumes.Volume
 import org.joml.*
-import org.scijava.log.LogService
-import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import java.io.File
 import java.nio.file.Paths
-import java.util.*
-import java.util.stream.Stream
 import kotlin.collections.ArrayList
 import kotlin.math.*
 
@@ -33,7 +23,7 @@ import kotlin.math.*
  * @author Justin Buerger <burger@mpi-cbg.de>
  * @author Ulrik Guenther <hello@ulrik.is>
  */
-class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, private val hub: Hub){
+class TractogramTools(maximumStreamlineCount: Int = 1000, private val scene: Scene, private val hub: Hub){
 
     enum class ColorMode {
         LocalDirection,
@@ -42,16 +32,35 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
 
     private var colorMode = ColorMode.GlobalDirection
     private var verticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
-    private var selectionVerticesOfStreamlines = ArrayList<ArrayList<Vector3f>>()
-    var _maximumStreamlineCount: Int = maximumStreamlineCount
-    private val logger = LoggerFactory.getLogger(Streamlines::class.java)
+    private var _maximumStreamlineCount: Int = maximumStreamlineCount
+    private val logger = LoggerFactory.getLogger(TractogramTools::class.java)
 
-    data class Components(val container: RichNode, val tractogramParent: RichNode, val tractogram: RichNode, val parcellationObject: RichNode)
+    /**
+     * Class to hold the relevant components for tractogram analysis and visualization: tractogram, parcellation and
+     * container objects to hold them. The tractogram is the scene object that contains the streamlines and the
+     * parcellation is the scene object that contains the meshes of the single brain regions.
+     * Structure of the scene:
+     * - container
+     *  - tractogramParent
+     *      - tractogram
+     *      - parcellationObject
+     *  - volume
+     * */
+    data class Components(val container: RichNode, val tractogramParent: RichNode, val tractogram: RichNode,
+                          val parcellationObject: RichNode)
+    /**
+     * Set up component structure by loading relevant files and creating scene objects and containers for them.
+     *
+     * @param trx Path to the .trx file of the tractogram
+     * @param parcellationPath Path to the .nifti file of the parcellation
+     * @param csvPath Path to the .csv file of the label map
+     * @param volumeDataset Path to the .nifti file of the volume
+     * @return Components object that contains the scene objects of the tractogram, the parcellation and the container
+     * */
     fun setUp(trx: String, parcellationPath: String, csvPath: String, volumeDataset: String): Components{
         val container = RichNode()
         container.spatial().rotation = Quaternionf().rotationX(-PI.toFloat()/2.0f)
         container.name = "brain parent"
-        scene.addChild(container)
 
         //load tractogram from file
         val tractogram = tractogramGameObject(trx)
@@ -61,9 +70,8 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
         container.addChild(tractogramParent)
 
         //load parcellation from file
-        val parcellationObject = NiftiReader.niftiFromFile(parcellationPath, hub, csvPath) as RichNode
+        val parcellationObject = NiftiReader.niftiFromFile(parcellationPath, csvPath = csvPath) as RichNode
         tractogramParent.addChild(parcellationObject)
-        scene.spatial().updateWorld(true)
 
         // Load nifti volume from file
         val volume = NiftiReader.niftiFromFile(volumeDataset, hub)
@@ -71,6 +79,61 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
         container.addChild(volume)
 
         return Components(container, tractogramParent, tractogram, parcellationObject)
+    }
+
+    fun getMaxStreamlines(): Int{
+        return _maximumStreamlineCount
+    }
+
+    /**
+     * Class to hold information about a streamline number change.
+     *
+     * @param reduction Boolean that indicates, if the streamline number was reduced (true) or increased (false)
+     * @param streamlines Scene object of the streamlines to either add (if reduction is false) or remove
+     * (if reduction is true)
+     * */
+    data class StreamlineNumberData(val reduction : Boolean, val streamlines : RichNode)
+    /**
+     * If the maximal number of streamlines to be displayed is changed, this function creates information about
+     * which streamlines to add or remove from the scene.
+     * In case of a streamline reduction (maximumStreamlineCount gets lowered), it stores the streamlines to be removed
+     * together with "true" for reduction in an object of type StreamlineNumberData.
+     * In case of a streamline increase (maximumStreamlineCount gets increased), it stores all streamline objects (the
+     * ones that already exist and the ones that are newly created) together with "false" for reduction in an object of
+     * type StreamlineNumberData.
+     *
+     * @param streamlinesToShow List of all streamlines that could be displayed, randomized arrangement, so that the
+     * first n streamlines can be taken without any further randomization
+     * @param oldTractogram Scene object of the tractogram that contains the streamlines that are currently displayed
+     * @param numStreamlines Number of streamlines that should be displayed
+     * @return StreamlineNumberData object that contains information about which streamlines to add or remove from the
+     * scene
+     * */
+    fun changeNumberOfStreamlines(streamlinesToShow: ArrayList<ArrayList<Vector3f>>, oldTractogram: RichNode, numStreamlines: Int) : StreamlineNumberData{
+        _maximumStreamlineCount = numStreamlines
+
+        var reduction = true
+        var streamlineList = RichNode()
+        val numStreamlinesOld = oldTractogram.children.size
+
+        if(numStreamlines>numStreamlinesOld){
+            var numbering = numStreamlinesOld
+            val filteredList = streamlinesToShow.filterIndexed { index, _ -> (index>=numStreamlinesOld) && index<numStreamlines}
+            displayableStreamlinesFromVerticesList(filteredList).children.forEach {
+                it.name = "Streamline #$numbering"
+                oldTractogram.addChild(it)
+                numbering++
+            }
+            streamlineList = oldTractogram
+            reduction = false
+        }else if(numStreamlines<numStreamlinesOld){
+            val filteredList = oldTractogram.children.filterIndexed { index, _ -> (index>=numStreamlines)}
+            filteredList.forEach{
+                streamlineList.addChild(it)
+            }
+        }
+
+        return StreamlineNumberData(reduction, streamlineList)
     }
 
     /**
@@ -90,16 +153,16 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
             logger.info("Inversion matrix and original matrix are inverse to each other with an acceptable error.")
         } else {
             logger.warn(
-                "The inversion matrix and the original matrix are not inverse to each other with an acceptable error of max $maxAcceptedDifference per cell. " +
-                        "The original transformation matrix needs to be applied to the tractogram instead of taking this route."
+                "The inversion matrix and the original matrix are not inverse to each other with an acceptable error " +
+                        "of max $maxAcceptedDifference per cell. The original transformation matrix needs to be " +
+                        "applied to the tractogram instead of taking this route."
             )
         }
-        // Prior to trying this, the transformation was applied to the tractogram directly, but this didn't work
         // TODO: Apply transformation directly to the tractogram (especially if warning gets displayed)
 
         /*
-        Decomposing the matrix to get components that can directly be applied to the volume scene object.
-        The following code can be deleted once there is a way to apply the transformation matrix as a whole to the volume.
+        Decomposing the matrix to get components that can directly be applied to the volume scene object. The following
+        code can be deleted once there is a way to apply the transformation matrix as a whole to the volume.
         * */
         val invertedRotation = Quaternionf(0f, 0f, 0f, 0f)
         val invertedScaling = Vector3f(1f, 1f, 1f)
@@ -136,7 +199,9 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
         * specific factors) and the inverse transformation of the tractogram,
         * which additionally gets applied within this function.
         */
-        // TODO: Combine information from both sources with sensible scaling factors (10, 100, 1000 maybe) (volume transformation and inverse tractogram transformation) in order to align tractogram (+parcellation) with the volume
+        // TODO: Combine information from both sources (volume transformation and inverse tractogram transformation)
+        //  with sensible scaling factors (10, 100, 1000 maybe) in order to align tractogram (+parcellation)
+        //  with the volume
 
         /*
         * The following factors can be used to explore which might be a combination of present information that leads
@@ -152,24 +217,21 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
         volume.spatialOrNull()?.position = volume.spatialOrNull()?.position?.mul(factorVolumeTranslation)?.add(invertedTranslation.mul(factorTractogramTranslation)) ?: Vector3f(0f,0f,0f)
 
         // TODO: Apply Transformation directly as a matrix to the volume
-        /*
-        * Trials to apply the transformation matrix directly to the volume matrix, however this does not update
-        * the actual transform yet, since this is rather defined by the single components scaling, rotation and translation (position)
-        * */
-        /*scene.spatial().updateWorld(true)
-        volume.spatialOrNull()?.world = volume.spatialOrNull()?.world?.mul(transformTractogram)  ?: Matrix4f().identity()
-        volume.spatialOrNull()?.wantsComposeModel = true*/
     }
 
     /**
-     * Function is used to test, if transforming the parcellation mesh directly via its vertices leads to a correct
-     * overlay of parcellation and tractogram, so that a streamline selection can be done.
+     * Function performs preparation steps, scene adaptations (changing visibilities), a streamline selection,
+     * checks on that selection and finally creates a scene object with the selected streamlines.
      *
-     * Idea: Transform vertices of the parcellation mesh by world transform and then transform
-     * @param tractogram Scene object of the tractogram parent, which contains the tractogram
+     * @param tractogram Scene object of the tractogram, which contains streamlines previously displayed
      * @param parcellationObject Scene object of the parcellation, which contains the meshes of the brain regions
+     * @param meshes List of meshes that should be used for streamline selection
+     * @param inclusion Boolean that indicates, if the streamlines that are selected should be included (true) or
+     * excluded (false)
+     * @return Scene object of the selected streamlines
      * */
-    fun streamlineSelectionTransformedMesh(parcellationObject: Node, tractogram: RichNode, meshes: List<Mesh>) {
+    fun streamlineSelectionTransformedMesh(parcellationObject: Node, tractogram: RichNode, meshes: List<Mesh>,
+                                           inclusion: Boolean = true): RichNode {
         scene.spatial().updateWorld(true)
         encodeTransformInMesh(tractogram, parcellationObject)
         parcellationObject.children.forEach { child ->
@@ -178,16 +240,21 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
         var selectedStreamlines = verticesOfStreamlines
         meshes.forEach{ mesh ->
             mesh.visible = true
-            selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(mesh, selectedStreamlines) as java.util.ArrayList<java.util.ArrayList<Vector3f>>
+            selectedStreamlines = StreamlineSelector.preciseStreamlineSelection(mesh, selectedStreamlines, inclusion)
+                    as java.util.ArrayList<java.util.ArrayList<Vector3f>>
         }
 
         tractogram.visible = false
+        var selectedTractogram = RichNode()
         try {
-            val selectedTractogram = displayableStreamlinesFromVerticesList(
-                selectedStreamlines.shuffled()
+            val shuffledSelectedStreamlines = selectedStreamlines.shuffled()
+            selectedTractogram = displayableStreamlinesFromVerticesList(
+                shuffledSelectedStreamlines
                     .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
             )
-            tractogram.parent?.addChild(selectedTractogram)
+            selectedTractogram.name = "Tractogram Selection"
+            selectedTractogram.metadata["Streamlines"] = shuffledSelectedStreamlines
+            //tractogram.parent?.addChild(selectedTractogram)
         }catch (e: Exception){
             if(selectedStreamlines.isEmpty()){
                 logger.warn("Empty list of streamlines. No streamline selection will be displayed.")
@@ -195,24 +262,26 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
                 logger.warn("Exception occurred: ${e.message}. No streamline selection will be displayed.")
             }
         }
+        return selectedTractogram
     }
 
     /**
      * Encodes local transforms of parcellation meshes and the parcellation object (parent of all meshes) into
-     * the vertices of the meshes. Then transforms the meshes and the parcellation object back, so that their
+     * the vertices of the meshes; Then transforms the meshes and the parcellation object back, so that their
      * positions, orientations and scaling haven't changed visually.
      *
      * @param tractogram Scene object of the tractogram
      * @param parcellationObject Scene object of the parcellation, which contains the meshes of the brain regions
      * */
-    fun encodeTransformInMesh(
+    private fun encodeTransformInMesh(
         tractogram: RichNode,
         parcellationObject: Node
     ) {
         scene.spatial().updateWorld(true)
 
         //  Check assumptions, that single Streamlines and tractogram as a whole are not transformed locally
-        //  TODO: if this assumption is not met, the local transforms needs to be applied to the vertices of the streamlines, before selecting streamlines
+        //  TODO: if this assumption is not met, the local transforms need to be applied to the vertices of the
+        //   streamlines, before selecting streamlines
         tractogram.children.forEach { streamline ->
             val spatial = streamline.spatialOrNull()
             val localTransform = spatial?.model ?: Matrix4f().identity()
@@ -228,7 +297,6 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
                     "Streamline selection might not work correctly, since it assumes no transform of the tractogram.")
         }
 
-
         // Get local parcellation transformation matrix
         val localParcellationTransform = parcellationObject.spatialOrNull()?.model ?: run {
             logger.warn("Model transform of test mesh is null. Applying identity matrix to the vertices instead.")
@@ -242,9 +310,9 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
              * match up, there might be an additional shearing component.
         */
         val worldTransformParcellationParent = Matrix4f().set(parcellationObject.parent?.spatialOrNull()?.world
-            ?: Matrix4f().identity()) // TODO: ERROR MANAGEMENT, tolerance
+            ?: Matrix4f().identity())
         worldTransformParcellationParent.mul(localParcellationTransform)
-        if(worldTransformParcellationParent != parcellationObject.spatialOrNull()?.world){
+        if(!worldTransformParcellationParent.equals(parcellationObject.spatialOrNull()?.world, 0.0001f)){
             logger.warn("World transform of parcellation object does not match with composition of world transform" +
                     "of it's parent with local transform of itself. There might be a shearing component that" +
                     "is not accounted for in the model matrix (local transform).")
@@ -283,18 +351,17 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
         scene.spatial().updateWorld(true)
     }
 
-    private fun tryTiffVolume(container: RichNode) {
-        //try to add volume as a .tif that was previously created via Fiji
-        val volumeTiffPath = System.getProperty("datasets") + "\\scenery_tractography_vis_cortex1_ushort.nii.tif"
-
+    /**
+     * Try to add a volume as a tiff that was previously created via Fiji. Currently not working, since the tiff
+     * doesn't get displayed.
+     * TODO: Fix this function to display a tiff volume with correct and automatically loaded transformation
+     *
+     * @param container Scene object that should contain the volume
+     * @param volumeTiffPath Path to the .tiff file of the volume
+     * */
+    private fun addTiffVolume(container: RichNode, volumeTiffPath: String){
         val volumeTiff = Volume.fromPath(Paths.get(volumeTiffPath), hub)
         volumeTiff.colormap = Colormap.get("grays")
-        //volumeTiff.transferFunction = TransferFunction.ramp(0.01f, 5200f) //0.5f before
-        /*val tf = TransferFunction("FlatAfter")
-        tf.addControlPoint(0.0f, 0f)
-        tf.addControlPoint(0.01f, 0f)
-        tf.addControlPoint(0.011f, 0.5f)
-        tf.addControlPoint(1.0f, 0.5f)*/
         val tf = TransferFunction()
         tf.addControlPoint(0.0f, 0.0f) // for pixel value 0, alpha is 0 (completely transparent)
         tf.addControlPoint(0.01f/65535.0f, 0.0f) // for pixel value 100, alpha is 0 (completely transparent)
@@ -304,13 +371,15 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
         tf.addControlPoint(3017.0f / 65535.0f, 1.0f)
         volumeTiff.transferFunction = tf
 
+        // Hard coded information from nifti volume, since the metadata did not change (checked while debugging)
+        // TODO: read metadata from tiff volume directly
         volumeTiff.spatial().scale = Vector3f(
             0.43169886f * 100f,
             0.4339234f * 100f,
             0.6199905f * 100
         ) //normally volume is loaded with *100 scaling, tractogram would be loaded without any factor applied to the scaling
         volumeTiff.spatial().position =
-            Vector3f(107.386f, -63.4674f, 119.598f).div(1000f) //for tractogram only divide by 10
+            Vector3f(107.386f, -63.4674f, 119.598f).div(1000f) //for tractogram only divided by 10
         val x = -0.0049300706f
         val y = -0.9989844f
         val z = 0.04474579f
@@ -319,32 +388,31 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
         container.addChild(volumeTiff)
     }
 
+    /**
+     * Loads tractogram from file and creates a scene object that contains a random selection of the streamlines
+     * stored in the file.
+     *
+     * @param trx Path to the .trx file of the tractogram
+     * @return Scene object of the tractogram containing the streamline representations
+     * */
     private fun tractogramGameObject(trx: String): RichNode {
-        // Load tractogram from file and add it to the scene
         val streamlinesAndTransform = tractogramFromFile(trx)
-        verticesOfStreamlines = streamlinesAndTransform.streamlines
-        selectionVerticesOfStreamlines = verticesOfStreamlines
-        /*val tractogram = RichNode()
-        tractogram.name = "tractogram"*/
-        // Display random selection of all streamlines
-        /*displayableStreamlinesFromVerticesList(
-            verticesOfStreamlines.shuffled()
-                .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
-        )
-            .forEach { streamline -> tractogram.addChild(streamline) }*/
-        val tractogram = displayableStreamlinesFromVerticesList(verticesOfStreamlines.shuffled().take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>)
+        verticesOfStreamlines = streamlinesAndTransform.streamlines.shuffled() as ArrayList<ArrayList<Vector3f>>
+        val tractogram = displayableStreamlinesFromVerticesList(verticesOfStreamlines.take(_maximumStreamlineCount)
+                as ArrayList<ArrayList<Vector3f>>)
         tractogram.metadata["voxelToRasMatrix"] = streamlinesAndTransform.voxelToRasMatrix
+        tractogram.metadata["Streamlines"] = verticesOfStreamlines
         return tractogram
     }
 
     data class TractogramData(val streamlines: ArrayList<ArrayList<Vector3f>>, val voxelToRasMatrix: Matrix4f)
     /**
-     * Reads a .trx file given by a path String and creates a tractogram scene object that contains a random selection of streamlines
+     * Reads a .trx file given by a path and returns a streamline list and a transformation matrix.
      *
      * @param path Path to the .trx file of the tractogram
-     * @return Scene Object of the tractogram //TODO: Update
+     * @return TractogramData object that contains the streamline list and the transformation matrix
      * */
-    fun tractogramFromFile(path: String): TractogramData{
+    private fun tractogramFromFile(path: String): TractogramData{
         val trx = TRXReader.readTRX(path)
         val transform = Matrix4f(trx.header.voxelToRasMM)
         transform.transpose()
@@ -375,7 +443,7 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
      * @param listVertices List of streamlines (which are lists of vertices / vector3f-points)
      * @return List of streamline scene-objects that can be rendered
      * */
-    fun displayableStreamlinesFromVerticesList(listVertices: ArrayList<ArrayList<Vector3f>>) : RichNode {
+    private fun displayableStreamlinesFromVerticesList(listVertices: List<java.util.ArrayList<Vector3f>>) : RichNode {
         var timeStamp0 = 0.toLong()
         var timeStampSplineSize = 0.toLong()
         var timeStampGeo = 0.toLong()
@@ -447,86 +515,14 @@ class Streamlines(maximumStreamlineCount: Int = 1000, private val scene: Scene, 
             geo
         }
 
-        /*val maxCurvatureFilter = 0.05f
-        streamlines.forEachIndexed{i, streamline ->
-            var curve = streamline.metadata.get("maximum curvature")
-            var curveFloat = curve.toString().toFloat()
-            if(curveFloat>maxCurvatureFilter){
-                streamline.visible = false
-            }
-        }*/
         logger.info("Maximum curvature is $maxCurve, maximum average curve is $maxAvCurve Maximum Fiber length is $maxLen")
         logger.info("Time for splineSize: ${(timeStampSplineSize-timeStamp0)*listVertices.size/1000000}, " +
                 "Time for creating curve-geometry: ${(timeStampGeo-timeStampSplineSize)*listVertices.size/1000000}")
-        tractogram.name = "tractogram"
+        tractogram.name = "Tractogram"
         tractogram.metadata["maxLength"] = maxLen
 
         return tractogram
     }
-
-    /**
-     * Handles the input: If there is a double click on mesh / brain region, a streamline selection is done and
-     * rendered instead of a whole tractogram
-     * */
-    //only used when setting up a scene on my own
-    /*override fun inputSetup() {
-        super.inputSetup()
-        setupCameraModeSwitching()
-
-        /*
-        * Defines the method which gets called as soon as there is a double click.
-        * The closest brain region to the click event will get selected and thus serves as the streamline selection criteria.
-        * */
-        val displayStreamlines: (Scene.RaycastResult, Int, Int) -> Unit = { raycastResult, _, _ ->
-            scene.children.filter { it.name == "brain parent" }[0].children
-                .filter { it.name == "tractogram parent" } [0].children
-                .filter { it.name == "tractogram" } [0].visible = false
-
-            var selectedArea : HasSpatial? = null
-            for (match in raycastResult.matches) {
-                if(match.node.name.startsWith("grp")){
-                    selectedArea = match.node as HasSpatial
-                    break
-                }
-            }
-
-            var streamlineSelection = StreamlineSelector.streamlineSelectionFromPolytope(selectedArea, selectionVerticesOfStreamlines)
-
-            val timeStampSelection = System.nanoTime() / 1000000
-
-            selectionVerticesOfStreamlines = streamlineSelection
-            if(streamlineSelection.isNotEmpty()) streamlineSelection = streamlineSelection.shuffled()
-                .take(_maximumStreamlineCount) as ArrayList<ArrayList<Vector3f>>
-            //else scene.children.filter { it.name == "tractogram" } [0].visible = true //if no streamlines are available, it might be an idea to just show the whole brain again
-            val tractogramReduced = RichNode()
-            scene.children.filter { it.name == "brain parent" }[0].children
-                .filter { it.name == "tractogram parent" } [0].addChild(tractogramReduced)
-
-            val timeStamp02 = System.nanoTime() / 1000000
-
-            /*val displayableStreamlines = displayableStreamlinesFromVerticesList(streamlineSelection)
-
-            val timeStampGeometry = System.nanoTime() / 1000000
-
-            displayableStreamlines.forEach{streamline -> tractogramReduced.addChild(streamline)}
-
-            scene.children.filter { it.name == "brain parent" }[0].children
-                .filter { it.name == "tractogram parent" } [0].removeChild("Reduced tractogram")
-            tractogramReduced.name = "Reduced tractogram"
-            logger.info("Time demand streamline selection: ${timeStampSelection-timeStamp0}, " +
-                    "Time demand calculating geometry of streamlines: ${timeStampGeometry-timeStamp02}")*/
-        }
-
-        renderer?.let { r ->
-            inputHandler?.addBehaviour(
-                "selectStreamlines", SelectCommand(
-                    "selectStreamlines", r, scene, {
-                        scene.findObserver()
-                    }, action = displayStreamlines, debugRaycast = false
-                ))
-        }
-        inputHandler?.addKeyBinding("selectStreamlines", "double-click button1")
-    }*/
 
     companion object {
         private val baseList = listOf(

@@ -1,30 +1,14 @@
-import com.esotericsoftware.minlog.Log
 import graphics.scenery.*
-import graphics.scenery.attribute.material.Material
 import graphics.scenery.attribute.spatial.HasSpatial
-import graphics.scenery.backends.Renderer
-import graphics.scenery.numerics.Random
-import graphics.scenery.utils.LazyLogger
-import graphics.scenery.utils.extensions.times
 import net.imglib2.KDTree
-import net.imglib2.Localizable
 import net.imglib2.RealPoint
 import net.imglib2.algorithm.kdtree.ClipConvexPolytopeKDTree
 import net.imglib2.algorithm.kdtree.ConvexPolytope
 import net.imglib2.algorithm.kdtree.HyperPlane
-//import net.imglib2.mesh.alg.InteriorPointTest //deprecated
 import net.imglib2.mesh.alg.Interior
-import org.joml.Matrix4f
 import org.joml.Vector2i
 import org.joml.Vector3f
-import org.joml.Vector4f
-import java.io.File
-import java.io.IOException
-import java.util.*
-import java.util.function.BiConsumer
 import kotlin.collections.ArrayList
-import kotlin.math.min
-
 
 /**
  * Provides functionality to select streamlines of a given List, by using meshes as the selection criteria.
@@ -35,163 +19,7 @@ import kotlin.math.min
  * before using the functions.
  * */
 class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280, windowHeight = 720)  {
-    /**
-     * Initializing function that is currently used to set up an example for the insideness test (testPointCloud1)
-     * */
-    override fun init() {
-        val propertiesFile = File(this::class.java.simpleName + ".properties")
-        if(propertiesFile.exists()) {
-            val p = Properties()
-            p.load(propertiesFile.inputStream())
-            logger.info("Loaded properties from $propertiesFile:")
-            p.forEach { k, v ->
-                logger.info(" * $k=$v")
-                System.setProperty(k as String, v as String)
-            }
-        }
-
-        renderer = hub.add(Renderer.createRenderer(hub, applicationName, scene, windowWidth, windowHeight))
-
-        val parcellationMesh = Mesh()
-        parcellationMesh.readFrom(System.getProperty("parcellationMesh"))
-
-        //Only used for testing purposes:
-        /*val firstMesh = parcellationMesh.children[0] as Mesh
-        firstMesh.materialOrNull()?.blending =
-            Blending(transparent = true, opacity = 0.5f, sourceColorBlendFactor = Blending.BlendFactor.SrcAlpha,
-                destinationColorBlendFactor = Blending.BlendFactor.OneMinusSrcAlpha)
-        scene.addChild(firstMesh)
-
-        val testMesh = MeshConverter.toImageJ(firstMesh)
-        //testPointCloud2(firstMesh, scene)
-        testPointCloud1(testMesh, scene)
-        //firstMesh.spatial().position = Vector3f(0f,0f,0f)
-        firstMesh.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)*/
-
-        val lightbox = Box(Vector3f(75.0f, 75.0f, 75.0f), insideNormals = true)
-        lightbox.name = "Lightbox"
-        lightbox.material {
-            diffuse = Vector3f(0.1f, 0.1f, 0.1f)
-            roughness = 1.0f
-            metallic = 0.0f
-            cullingMode = Material.CullingMode.None
-        }
-        scene.addChild(lightbox)
-        val ambient = AmbientLight(intensity = 0.5f)
-        scene.addChild(ambient)
-
-        Light.createLightTetrahedron<PointLight>(spread = 2.0f, intensity = 5.0f)
-            .forEach {
-                it.emissionColor = Random.random3DVectorFromRange(0.2f, 0.8f)
-                scene.addChild(it)
-            }
-
-        val cam: Camera = DetachedHeadCamera()
-        cam.spatial {
-            position = Vector3f(0.0f, 0.0f, 10.0f)
-        }
-        cam.perspectiveCamera(50.0f, windowWidth, windowHeight)
-        scene.addChild(cam)
-
-    }
-
-    /**
-     * Tests the imgLib2-Mesh library for its mesh-insideness test with an example mesh and 100,000 sample points
-     * Can show spheres where points are selected, so it can be used to check which points are selected visually;
-     * Only works, when mesh is given in the configuration file
-     * */
-    //TODO: Use this to construct a test case outside of this class
-    /*fun testPointCloud1(mesh : net.imglib2.mesh.Mesh, container : Node) {
-        val points: MutableList<Vector3f> = ArrayList()
-        val realPoints: MutableList<RealPoint> = ArrayList()
-        val parentContainer = RichNode()
-        container.addChild(parentContainer)
-        for (i in 0..9999) {
-            val x = (40 * Math.random()).toFloat()-3
-            val y = (90 * Math.random()).toFloat()-82
-            val z = (70 * Math.random()).toFloat()+20
-            val point = Vector3f(x, y, z)
-            val realPoint = RealPoint(point.x, point.y, point.z)
-            realPoints.add(realPoint)
-            points.add(point)
-            /*val sphere = Sphere()
-            sphere.spatial().position = Vector3f(x,y,z)
-            sphere.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
-            parentContainer.addChild(sphere)*/
-        }
-
-        val timeStamp0 = System.nanoTime()
-        //val interiorPointTest = InteriorPointTest(mesh, 1.0) //deprecated
-        val interiorPointTest = Interior(mesh, 1.0)
-
-        /*points.forEach{point ->
-            val point_real = RealPoint(point.x, point.y, point.z)
-            if (interiorPointTest.isInside(point_real)) {
-                val sphere = Sphere()
-                sphere.spatial().position = Vector3f(point.x.toFloat(),point.y.toFloat(),point.z.toFloat())
-                sphere.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
-                sphere.material().wireframe = true
-                parentContainer.addChild(sphere)
-            }
-        }*/
-        realPoints.forEach{point ->
-            if (interiorPointTest.isInside(point)) {
-                val sphere = Sphere()
-                sphere.spatial().position = Vector3f(point.getFloatPosition(0),point.getFloatPosition(1),point.getFloatPosition(2))
-                sphere.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
-                sphere.material().wireframe = true
-                parentContainer.addChild(sphere)
-            }
-        }
-        val timeStamp1 = System.nanoTime()
-        Log.info("Time difference was: ${timeStamp1-timeStamp0}")
-        parentContainer.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
-
-    }*/
-
-    /**
-     * Tests the function insidePoint of this class an example mesh and 100,000 sample points
-     * Can show spheres where points are selected, so it can be used to check which points are selected visually;
-     * Only works, when mesh is given in the configuration file
-     * */
-    //TODO: Use this to construct a test case outside of this class
-    /*fun testPointCloud2(mesh : Mesh, container : Node) {
-        val points: MutableList<Vector3f> = ArrayList()
-        val realPoints: MutableList<RealPoint> = ArrayList()
-        val parentContainer = RichNode()
-        container.addChild(parentContainer)
-        for (i in 0..9999) {
-            val x = (40 * Math.random()).toFloat()-3
-            val y = (90 * Math.random()).toFloat()-82
-            val z = (70 * Math.random()).toFloat()+20
-            val point = Vector3f(x, y, z)
-            val realPoint = RealPoint(point.x, point.y, point.z)
-            points.add(point)
-            realPoints.add(realPoint)
-            realPoints.add(realPoint)
-        }
-        val insideMask = insidePoints(mesh, realPoints)
-        var streamlineSelection = realPoints.filterIndexed { index, _ ->
-            insideMask.getOrNull(index/2) == true
-        }
-        streamlineSelection.forEach {point ->
-            val sphere = Sphere()
-            sphere.spatial().position = Vector3f(point.getFloatPosition(0),point.getFloatPosition(1),point.getFloatPosition(2))
-            sphere.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
-            sphere.material().wireframe = true
-            parentContainer.addChild(sphere) }
-
-        parentContainer.spatial().scale = Vector3f(0.1f, 0.1f, 0.1f)
-
-    }*/
-
-
     companion object {
-        @JvmStatic
-        fun main(args: Array<String>) {
-            StreamlineSelector().main()
-        }
-
         /**
          * Determines all streamlines that precisely start or end in a given mesh.
          * Make sure that the mesh and streamlines are in the same space, before using this method!
@@ -200,25 +28,26 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * @param streamlines List of all streamlines to be selected from
          * @return List of streamlines that got selected
          * */
-        fun preciseStreamlineSelection(sceneryMesh: Mesh, streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>) : List<java.util.ArrayList<Vector3f>>{
+        fun preciseStreamlineSelection(sceneryMesh: Mesh, streamlines : java.util.ArrayList<java.util.ArrayList<Vector3f>>, inclusion: Boolean = true) : List<java.util.ArrayList<Vector3f>>{
             val imgJMesh = MeshConverter.toImageJ(sceneryMesh)
 
             val insideMask = insidePoints(imgJMesh, startAndEndPointList(streamlines))
             val streamlineSelection = streamlines.filterIndexed { index, _ ->
-                insideMask.getOrNull(index) == true
+                insideMask.getOrNull(index) == inclusion
             }
-            //var streamlineSelection = streamlines.take(10) //Dummy-Line to give back a Streamline selection, that can be displayed without time-consuming calculation
             return streamlineSelection
         }
 
         /**
-         * Determines Streamlines that start or end within the Bounding box of a given 3-polytope
+         * Determines Streamlines that start or end within the Bounding box of a given 3-polytope. This function
+         * only works correctly, if all transformations of the polytope are encoded in its coordinates.
          *
          * @param selectedArea Node that holds the 3-Polytope which defines the area in which Streamlines have to start of finish to be selected
          * @param streamlines All streamlines from which should be selected
          * @return List of selected Streamlines (List of List of Points in a single streamline) that start or finish in the given polytope
          * */
-        fun streamlineSelectionFromPolytope(selectedArea: HasSpatial?, streamlines: java.util.ArrayList<java.util.ArrayList<Vector3f>>): java.util.ArrayList<java.util.ArrayList<Vector3f>> { //TODO: transformations need to be applied to polytope before using in this function
+        // TODO: might not work on all datasets, check Hyperplane creation for correctness if translation is different from (0,0,0)
+        fun streamlineSelectionFromPolytope(selectedArea: HasSpatial?, streamlines: java.util.ArrayList<java.util.ArrayList<Vector3f>>): java.util.ArrayList<java.util.ArrayList<Vector3f>> {
             /*
             * Calculation of the Hyperplanes that form the bounding box.
             * The Hyperplanes form the polytope which is input to the following algorithm.
@@ -226,8 +55,6 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
             // calculations of the hyperplane distances (second argument):
             // normal vector *(point product) point
             // here: translation+extend of the bounding box/normal vector length (here: 1 or -1)
-            val timeStamp0 = System.nanoTime() / 1000000
-
             val cubePos = selectedArea?.spatial()?.position ?: throw NullPointerException()
             val boundingBox = selectedArea.boundingBox ?: throw NullPointerException()
             val hyperplane1 = HyperPlane(0.0,0.0,-1.0, boundingBox.max.z.toDouble().plus(cubePos.z).times(-1))
@@ -238,24 +65,21 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
             val hyperplane6 = HyperPlane(0.0, 1.0,0.0, boundingBox.min.y.toDouble().plus(cubePos.y))
             val polytope = ConvexPolytope(hyperplane1, hyperplane2, hyperplane3, hyperplane4, hyperplane5, hyperplane6)
 
-            val timeStampPolytope = System.nanoTime() / 1000000
 
             /*
             * Create KD-tree as the data structure holding all points where streamlines start or end.
             * A new KD-tree only gets created, if the initial amount of streamlines already got reduced,
             * since an initial KD-tree gets created in init().
             * */
-            val localKDTree : KDTree<Vector2i>
-            //TODO: Think of a new way to not always recreate the KD-tree: the global variables globalKDTree and verticesOfStreamlines come from the Streamlines-Class
+            val localKDTree =  createKDTree(streamlines)
+            //TODO: Think of a new way to not always recreate the KD-tree:
+            // the global variables globalKDTree and verticesOfStreamlines come from the Streamlines-Class
             /*if(streamlines == verticesOfStreamlines){
                 localKDTree = globalKDTree
             }else{
                 localKDTree = createKDTree(streamlines)
             }*/
 
-            localKDTree = createKDTree(streamlines)
-
-            val timeStampKDTree = System.nanoTime() / 1000000
 
             /*
             * Create and use data structure to determine inside points of a polytope.
@@ -269,11 +93,6 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
                 val index = node.get().x
                 streamlineSelection.add(streamlines[index])
             }
-
-            //logger.info("Streamline selection contains ${streamlineSelection.size} streamlines.")
-            val timeStampClipTree = System.nanoTime() / 1000000
-            //logger.info("Time polytope: ${timeStampPolytope-timeStamp0}, Time kdTree: ${timeStampKDTree-timeStampPolytope}, Time clipTree: ${timeStampClipTree-timeStampKDTree}")
-
             return streamlineSelection
         }
 
@@ -305,7 +124,7 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * @return list of indices of selected points
          * */
         //TODO: Do we need to test watertightness?
-        private fun insidePoints(imgJMesh : net.imglib2.mesh.Mesh, pointCloud: List<RealPoint>): ArrayList<Boolean>{
+        fun insidePoints(imgJMesh : net.imglib2.mesh.Mesh, pointCloud: List<RealPoint>): ArrayList<Boolean>{
             val interiorPointTest = Interior(imgJMesh, 1.0)
             val insideMask = ArrayList<Boolean>(pointCloud.size/2)
 
