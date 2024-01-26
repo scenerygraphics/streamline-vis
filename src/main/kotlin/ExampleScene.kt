@@ -27,6 +27,11 @@ class ExampleScene : SceneryBase("No arms, no cookies", windowWidth = 1280, wind
         //testStreamlineSelector()
     }
 
+    override fun inputSetup() {
+        super.inputSetup()
+        setupCameraModeSwitching()
+    }
+
     private fun testStreamlineSelector() {
         // Tests of Streamline Selector with test objects
         val firstMesh = datasetSetupStreamlineSelector()
@@ -36,7 +41,7 @@ class ExampleScene : SceneryBase("No arms, no cookies", windowWidth = 1280, wind
 
     private fun datasetSetupStreamlineSelector(): Mesh {
         // The following parcellation mesh was created outside of Scenery
-        val parcellationMeshPath = "$dataPath\\scenery_tractography_vis_cortex_labels.nii.gz.obj"
+        val parcellationMeshPath = "$dataPath/scenery_tractography_vis_cortex_labels.nii.gz.obj"
         val parcellationMesh = Mesh()
         parcellationMesh.readFrom(parcellationMeshPath)
         val firstMesh = parcellationMesh.children[0] as Mesh
@@ -53,7 +58,7 @@ class ExampleScene : SceneryBase("No arms, no cookies", windowWidth = 1280, wind
         tractogramTools = TractogramTools(1000, this.scene, this.hub)
         setUpDatasetsTractogramTools()
         scene.addChild(sceneComponents.container)
-        streamlineSelectionTestTractogramTools()
+//        streamlineSelectionTestTractogramTools()
 
         // Try using a .tiff instead of the nifti to load the volume
         // Could help to gather information about why transforming the nifti with its metadata does not align it with
@@ -124,10 +129,10 @@ class ExampleScene : SceneryBase("No arms, no cookies", windowWidth = 1280, wind
      * */
     private fun setUpDatasetsTractogramTools(){
         val volumeDataset =
-            "$dataPath\\scenery_tractography_vis_cortex1_ushort.nii.gz"
-        val trx = "$dataPath\\scenery_tractography_vis_wholebrain_newreference.trx"
-        val parcellationPath = "$dataPath\\scenery_tractography_vis_cortex_labels.nii.gz"
-        val csvPath = "$dataPath\\ctab_lhrh_vol.csv"
+            "$dataPath/scenery_tractography_vis_cortex1_ushort.nii.gz"
+        val trx = "$dataPath/scenery_tractography_vis_wholebrain_newreference.trx"
+        val parcellationPath = "$dataPath/scenery_tractography_vis_cortex_labels.nii.gz"
+        val csvPath = "$dataPath/ctab_lhrh_vol.csv"
 
         sceneComponents = tractogramTools.setUp(trx, parcellationPath, csvPath, volumeDataset)
     }
