@@ -70,7 +70,7 @@ class TractogramTools(maximumStreamlineCount: Int = 1000, private val scene: Sce
         container.addChild(tractogramParent)
 
         //load parcellation from file
-        val parcellationObject = NiftiReader.niftiFromFile(parcellationPath, csvPath = csvPath) as RichNode
+        val parcellationObject = NiftiReader.parcellationFromFile(parcellationPath, csvPath = csvPath) as RichNode
         tractogramParent.addChild(parcellationObject)
 
         // Load nifti volume from file

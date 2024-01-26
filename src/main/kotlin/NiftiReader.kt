@@ -22,18 +22,8 @@ class NiftiReader {
          * @return Node containing the volume
          * */
         fun niftiFromFile(niftiPath: String, hub: Hub): Node{
-            val nifti = ImgOpener().openImgs(niftiPath)[0]
-            val type = nifti.firstElement().javaClass
-            val rawMetadata = getMetadata(nifti)
-            val metadata = transformNiftiMetadata(rawMetadata)
-            val node: Node
-            if(type == UnsignedShortType().javaClass){
-                node = Volume.fromPath(Paths.get(niftiPath), hub)
-            }else{
-                logger.error("Nifti $niftiPath does not contain a volume of pixel type UnsignedShort, but instead of $type " +
-                        "and is thus not supported by this reader.")
-                node = Volume()
-            }
+            val node = Volume.fromPath(Paths.get(niftiPath), hub)
+            val metadata = transformNiftiMetadata(node.metadata)
             transformNode(node, metadata)
             return node
         }
@@ -45,7 +35,7 @@ class NiftiReader {
          * @param csvPath Path to csv file containing the label map
          * @return Node containing the parcellation
          * */
-        fun niftiFromFile(niftiPath: String, csvPath: String): Node{
+        fun parcellationFromFile(niftiPath: String, csvPath: String): Node{
             val nifti = ImgOpener().openImgs(niftiPath)[0]
             val type = nifti.firstElement().javaClass
             val rawMetadata = getMetadata(nifti)
