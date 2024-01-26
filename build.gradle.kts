@@ -33,7 +33,10 @@ dependencies {
     api("graphics.scenery:scenery:7a924aba")
     //branch with new Curve implementation, that offers better curve metrics and will be used in future
     //implementation("com.github.scenerygraphics:scenery:curve_restructuring-SNAPSHOT")
-    api("org.slf4j:slf4j-simple:1.7.36")
+    api("org.slf4j:slf4j-simple:2.0.9")
+    api("org.yaml:snakeyaml:1.33") {
+        version { strictly("1.33") }
+    }
     implementation("org.joml:joml:1.10.4")
     implementation("net.imglib2:imglib2:5.13.0")
     //used for the mesh implementation that is currently used for the point-test
@@ -46,8 +49,14 @@ dependencies {
     implementation(platform("org.scijava:pom-scijava:32.0.0"))
     implementation("io.scif:scifio")
     runtimeOnly("io.scif:scifio-bf-compat")
-    runtimeOnly("ome:formats-bsd")
-    runtimeOnly("ome:formats-gpl")
+    runtimeOnly("ome:formats-bsd:7.1.0") {
+        exclude("org.slf4j", "slf4j-api")
+        exclude("org.slf4j", "slf4j-simple")
+    }
+    runtimeOnly("ome:formats-gpl:7.1.0") {
+        exclude("org.slf4j", "slf4j-api")
+        exclude("org.slf4j", "slf4j-simple")
+    }
 
     testImplementation(kotlin("test"))
 }
