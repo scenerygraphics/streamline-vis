@@ -61,8 +61,12 @@ class NiftiReader {
          * */
         private fun getMetadata(nifti: SCIFIOImgPlus<*>) : HashMap<String, Any>{
             val niftiMetadataRaw = HashMap<String, Any>()
-            nifti.metadata.table.forEach { key, value ->
+            nifti.metadata.table
+                .map { it.key to it.value }
+                .sortedBy { it.first }
+                .forEach { (key, value) ->
                 niftiMetadataRaw[key] = value
+                logger.info("${nifti.name}: $key = $value")
             }
             return niftiMetadataRaw
         }
@@ -148,13 +152,15 @@ class NiftiReader {
             quaternion.get(axisAngle)
             node.spatialOrNull()?.rotation = quaternion
 
-            if(isVolume(node)){
-                node as Volume
+            logger.info("Axis/Angle is $axisAngle")
+
+            if(node is Volume) {
                 node.spatialOrNull()?.position = (metadata["translation"] as Vector3f).div(1000f)
                 node.spatialOrNull()?.scale = (metadata["scale"] as Vector3f).mul(100f)
                 node.name = "Volume"
                 node.colormap = Colormap.get("grays")
                 node.transferFunction = TransferFunction.ramp(0.01f, 0.5f)
+                node.origin = Origin.FrontBottomLeft
             }else{
                 node.spatialOrNull()?.position = (metadata["translation"] as Vector3f).div(10.0f)
                 node.spatialOrNull()?.scale = (metadata["scale"] as Vector3f)
@@ -165,21 +171,6 @@ class NiftiReader {
             // node.spatialOrNUll()?.wantsComposeModel = false
             // node.spatialOrNull()?.model = transform
             //TODO: try setting node.origin = Origin.Center
-        }
-
-        /**
-         * Check if node can be cast to a volume.
-         *
-         * @param node Node to be checked
-         * @return true if node can be cast to a volume, false otherwise
-         * */
-        private fun isVolume(node: Node): Boolean{
-            try {
-                node as Volume
-                return true
-            }catch (e: Exception){
-                return false
-            }
         }
     }
 }
