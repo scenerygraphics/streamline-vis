@@ -1,11 +1,20 @@
 import graphics.scenery.*
 import graphics.scenery.attribute.material.Material
 import graphics.scenery.backends.Renderer
+import graphics.scenery.controls.behaviours.SelectCommand
+import graphics.scenery.geometry.Curve
 import graphics.scenery.numerics.Random
+import graphics.scenery.utils.extensions.plus
+import graphics.scenery.utils.extensions.times
+import graphics.scenery.volumes.BufferedVolume
 import org.joml.Vector3f
+import org.scijava.ui.behaviour.ClickBehaviour
 import java.io.File
 import java.util.*
 import kotlin.collections.ArrayList
+import kotlin.concurrent.thread
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * Class sets up a default scene and tests functionality of TractogramTools and StreamlineSelector to be checked
@@ -30,6 +39,86 @@ class ExampleScene : SceneryBase("No arms, no cookies", windowWidth = 1280, wind
     override fun inputSetup() {
         super.inputSetup()
         setupCameraModeSwitching()
+
+        val areas = mutableListOf<Mesh>()
+        var lastPartial: RichNode? = null
+
+        val wiggle: (Scene.RaycastResult, Int, Int) -> Unit = { result, _, _ ->
+            result.matches.firstOrNull()?.let { nearest ->
+                logger.info("Nearest is ${nearest.node}, ${nearest.node.javaClass}")
+                val n = nearest.node
+                if(n is Mesh) {
+                    when(areas.size) {
+                        0 -> areas.add(n)
+                        1 -> {
+                            areas.add(n)
+                            val originalColor = areas.first().material().diffuse
+                            var done = false
+                            thread {
+                                var t = 0.0
+                                while(!done) {
+                                    areas.first().material().diffuse = originalColor + originalColor * 0.2f * sin(t).toFloat()
+                                    Thread.sleep(2)
+                                    t += 0.002
+                                }
+                                areas.first().material().diffuse = originalColor
+                            }
+                            thread {
+                                val reducedTractogram = tractogramTools.streamlineSelectionTransformedMesh(
+                                    sceneComponents.parcellationObject,
+                                    sceneComponents.tractogram,
+                                    areas
+                                )
+                                sceneComponents.tractogramParent.addChild(reducedTractogram)
+                                lastPartial = reducedTractogram
+                                done = true
+                            }
+                        }
+                        else -> {
+                            areas.clear()
+                            lastPartial?.visible = false
+                            sceneComponents.parcellationObject.children.forEach { it.visible = true }
+                            sceneComponents.tractogram.visible = true
+                        }
+                    }
+                }
+                val originalPosition = Vector3f(nearest.node.spatialOrNull()?.position)
+                thread {
+                    for (i in 0 until 200) {
+                        nearest.node.spatialOrNull()?.position = originalPosition + Random.random3DVectorFromRange(-0.05f, 0.05f)
+                        Thread.sleep(2)
+                    }
+
+                    nearest.node.spatialOrNull()?.position = originalPosition
+                }
+            }
+        }
+
+        inputHandler?.addBehaviour("reset", ClickBehaviour { _, _ ->
+            if(areas.size >= 2) {
+                areas.clear()
+                lastPartial?.visible = false
+                sceneComponents.parcellationObject.children.forEach { it.visible = true }
+                sceneComponents.tractogram.visible = true
+            }
+        })
+
+        inputHandler?.addKeyBinding("reset", "shift R")
+
+        renderer?.let { r ->
+            inputHandler?.addBehaviour(
+                "select", SelectCommand(
+                    "select", r, scene,
+                    { scene.findObserver() }, action = wiggle, debugRaycast = false, ignoredObjects = listOf(
+                        RichNode::class.java,
+                        Curve::class.java,
+                        Curve.PartialCurve::class.java,
+                        PointLight::class.java,
+                        BufferedVolume::class.java)
+                )
+            )
+            inputHandler?.addKeyBinding("select", "double-click button1")
+        }
     }
 
     private fun testStreamlineSelector() {
@@ -131,7 +220,7 @@ class ExampleScene : SceneryBase("No arms, no cookies", windowWidth = 1280, wind
         val volumeDataset =
             "$dataPath/scenery_tractography_vis_cortex1_ushort.nii.gz"
         val trx = "$dataPath/scenery_tractography_vis_wholebrain_newreference.trx"
-        val parcellationPath = "$dataPath/scenery_tractography_vis_cortex_labels.nii.gz"
+        val parcellationPath = "$dataPath/scenery_tractography_vis_cortex_labels.nii"
         val csvPath = "$dataPath/ctab_lhrh_vol.csv"
 
         sceneComponents = tractogramTools.setUp(trx, parcellationPath, csvPath, volumeDataset)
