@@ -75,7 +75,7 @@ class TractogramTools(maximumStreamlineCount: Int = 1000, private val scene: Sce
 
         // Load nifti volume from file
         val volume = NiftiReader.niftiFromFile(volumeDataset, hub)
-        applyInvTractogramTransform(tractogram, volume) //TODO: tractogram, volume and parcellation need to align
+//        applyInvTractogramTransform(tractogram, volume) //TODO: tractogram, volume and parcellation need to align
         container.addChild(volume)
 
         return Components(container, tractogramParent, tractogram, parcellationObject)

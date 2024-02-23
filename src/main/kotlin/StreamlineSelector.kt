@@ -1,5 +1,8 @@
 import graphics.scenery.*
 import graphics.scenery.attribute.spatial.HasSpatial
+import graphics.scenery.utils.forEachIndexedAsync
+import graphics.scenery.utils.forEachParallel
+import kotlinx.coroutines.*
 import net.imglib2.KDTree
 import net.imglib2.RealPoint
 import net.imglib2.algorithm.kdtree.ClipConvexPolytopeKDTree
@@ -8,7 +11,17 @@ import net.imglib2.algorithm.kdtree.HyperPlane
 import net.imglib2.mesh.alg.Interior
 import org.joml.Vector2i
 import org.joml.Vector3f
+import java.util.*
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.collections.ArrayList
+import kotlin.collections.HashSet
+import kotlin.concurrent.thread
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.ContinuationInterceptor
+import kotlin.coroutines.CoroutineContext
+import kotlin.time.Duration
+import kotlin.time.measureTimedValue
 
 /**
  * Provides functionality to select streamlines of a given List, by using meshes as the selection criteria.
@@ -20,6 +33,8 @@ import kotlin.collections.ArrayList
  * */
 class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280, windowHeight = 720)  {
     companion object {
+        val PointDispatcher = newFixedThreadPoolContext(8, "PointsWorker")
+
         /**
          * Determines all streamlines that precisely start or end in a given mesh.
          * Make sure that the mesh and streamlines are in the same space, before using this method!
@@ -33,7 +48,8 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
 
             val insideMask = insidePoints(imgJMesh, startAndEndPointList(streamlines))
             val streamlineSelection = streamlines.filterIndexed { index, _ ->
-                insideMask.getOrNull(index) == inclusion
+//                insideMask.getOrNull(index) == inclusion
+                insideMask.contains(index) == inclusion
             }
             return streamlineSelection
         }
@@ -124,17 +140,25 @@ class StreamlineSelector: SceneryBase("No arms, no cookies", windowWidth = 1280,
          * @return list of indices of selected points
          * */
         //TODO: Do we need to test watertightness?
-        fun insidePoints(imgJMesh : net.imglib2.mesh.Mesh, pointCloud: List<RealPoint>): ArrayList<Boolean>{
-            val interiorPointTest = Interior(imgJMesh, 1.0)
-            val insideMask = ArrayList<Boolean>(pointCloud.size/2)
+//        fun insidePoints(imgJMesh : net.imglib2.mesh.Mesh, pointCloud: List<RealPoint>): Array<Boolean>{
+        fun insidePoints(imgJMesh : net.imglib2.mesh.Mesh, pointCloud: List<RealPoint>): Set<Int>{
+            val m = measureTimedValue {
+                val threadLocalTest = ThreadLocal.withInitial { Interior(imgJMesh, 1.0) }
+                val insideMask = Collections.synchronizedSet(HashSet<Int>(pointCloud.size / 2))
 
-            pointCloud.forEachIndexed{index, point ->
-                if(index%2==0) insideMask.add(false)
-                if (interiorPointTest.isInside(point)) {
-                    insideMask[index/2] = true
+                val index = AtomicInteger(0)
+                val f = { i: Int, point: RealPoint ->
+                    if(threadLocalTest.get().isInside(point)) {
+                        insideMask.add(i / 2)
+                    }
                 }
+                runBlocking(PointDispatcher) { pointCloud.map { async { f(index.getAndIncrement(), it) } }.joinAll() }
+
+                insideMask
             }
-            return insideMask
+
+            println("Took ${m.duration.inWholeMilliseconds} ms")
+            return m.value
         }
 
         /**
